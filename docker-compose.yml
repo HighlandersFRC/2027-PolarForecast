@@ -31,13 +31,32 @@ services:
 
     environment:
       KEYCLOAK_BASE_URL: http://keycloak:8080
-      MONGO_URI: ${DOCKER_MONGO_URI:-mongodb://host.docker.internal:27017/}
+      MONGO_URI: mongodb://mongodb:27017/
 
     depends_on:
-      - keycloak
+      keycloak:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
 
     volumes:
       - ./API:/app/API
+
+  mongodb:
+    build:
+      context: ./mongodb
+      dockerfile: Dockerfile
+    container_name: polar-forecast-mongodb
+
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    volumes:
+      - mongodb_data:/data/db
 
   keycloak:
     build:
@@ -64,3 +83,4 @@ services:
 
 volumes:
   keycloak_h2:
+  mongodb_data:
