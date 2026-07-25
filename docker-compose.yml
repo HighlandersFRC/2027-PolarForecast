@@ -1,4 +1,22 @@
 services:
+  app:
+    build:
+      context: ./APP
+      dockerfile: Dockerfile
+      args:
+        API_BASE_URL: ${APP_API_BASE_URL:-http://localhost:8081}
+        KEYCLOAK_ISSUER: ${APP_KEYCLOAK_ISSUER:-http://localhost:8000/realms/polarforecast-web}
+        REDIRECT_URI: ${APP_REDIRECT_URI:-http://localhost:3000/}
+        POST_LOGOUT_REDIRECT_URI: ${APP_POST_LOGOUT_REDIRECT_URI:-http://localhost:3000/}
+    container_name: polar-forecast-app
+
+    ports:
+      - "${APP_PORT:-3000}:80"
+
+    depends_on:
+      - api
+      - keycloak
+
   api:
     build:
       context: .

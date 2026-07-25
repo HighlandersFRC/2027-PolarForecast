@@ -9,10 +9,19 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 // IMPORTANT: These values come from your realm-export file.
-const String KEYCLOAK_ISSUER = 'http://localhost:8000/realms/polarforecast-web';
+const String KEYCLOAK_ISSUER = String.fromEnvironment(
+  'KEYCLOAK_ISSUER',
+  defaultValue: 'http://localhost:8000/realms/polarforecast-web',
+);
 const String CLIENT_ID = 'polarforecast-gui';
-const String REDIRECT_URI = 'http://localhost:3000/';
-const String POST_LOGOUT_REDIRECT_URI = 'http://localhost:3000/';
+const String REDIRECT_URI = String.fromEnvironment(
+  'REDIRECT_URI',
+  defaultValue: 'http://localhost:3000/',
+);
+const String POST_LOGOUT_REDIRECT_URI = String.fromEnvironment(
+  'POST_LOGOUT_REDIRECT_URI',
+  defaultValue: 'http://localhost:3000/',
+);
 
 class AuthService extends ChangeNotifier {
   String? accessToken;
