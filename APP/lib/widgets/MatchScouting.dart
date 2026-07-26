@@ -89,11 +89,11 @@ class _MatchScoutingState extends State<MatchScouting> {
 
   String? get _fieldImagePath {
     if (_isRedAlliance) {
-      return "2026FRCFeildImageFull.png";
+      return "assets/2026FRCFeildImageFull.png";
     }
 
     if (_isBlueAlliance) {
-      return "2026FRCFeildImageBlue.png";
+      return "assets/2026FRCFeildImageBlue.png";
     }
 
     // Do not show a field while Random is selected.

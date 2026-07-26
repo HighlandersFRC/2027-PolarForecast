@@ -712,7 +712,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
                       children: [
                         const ColoredBox(color: Color(0xFF090A0D)),
                         Image.asset(
-                          '2026FRCFeildImageFull.png',
+                          'assets/2026FRCFeildImageFull.png',
                           width: fieldWidth,
                           height: fieldHeight,
                           fit: BoxFit.contain,

@@ -3864,7 +3864,7 @@ class _AutoPathReplay extends StatefulWidget {
   const _AutoPathReplay({
     super.key,
     required this.path,
-  }) : fieldImagePath = '2026FRCFeildImageFull.png';
+  }) : fieldImagePath = 'assets/2026FRCFeildImageFull.png';
 
   @override
   State<_AutoPathReplay> createState() => _AutoPathReplayState();
