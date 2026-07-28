@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from models.ScoutInfo import ScoutInfo
+from models.scout_info import ScoutInfo
 
 class AutoScouting(BaseModel):
     fuel_scored: int

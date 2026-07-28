@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from models.ScoutInfo import ScoutInfo
+from models.scout_info import ScoutInfo
 
 class PitAutoRoutine(BaseModel):
     name: str
@@ -21,7 +21,6 @@ class Data(BaseModel):
     climb: str
     bps: float
 
-    # DO NOT TOUCH THIS IS FOR VALIDATION FOR DATA INPUT
     autos: Auto
     driver_events: int
     favorite_robot_part: str

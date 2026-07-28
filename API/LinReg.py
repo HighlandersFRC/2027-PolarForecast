@@ -3,14 +3,8 @@ from collections import defaultdict
 from typing import Any, Iterable, Optional
 
 import numpy as np
-import requests
 
-from config import TBA_API_URL, TBA_KEY
-
-
-HEADERS = {
-    "X-TBA-Auth-Key": TBA_KEY,
-}
+from tba_client import get_tba_json
 
 
 COMP_LEVEL_ORDER = {
@@ -22,70 +16,31 @@ COMP_LEVEL_ORDER = {
 }
 
 
-# GroupStats OPR fusion configuration.
-# Scouting is intentionally favored over TBA for the fuel contribution.
-SCOUTING_OPR_WEIGHT = 0.70
-TBA_OPR_WEIGHT = 1.0 - SCOUTING_OPR_WEIGHT
+SCOUTING_FUEL_WEIGHT = 0.70
+TBA_FUEL_WEIGHT = 1.0 - SCOUTING_FUEL_WEIGHT
 
-# Convert directly scouted fuel counts into scoring contribution. Change
-# these values if auto and teleop fuel have different point values.
 SCOUTED_AUTO_FUEL_POINT_VALUE = 1.0
 SCOUTED_TELEOP_FUEL_POINT_VALUE = 1.0
 
 
-# The first matching TBA score-breakdown field is used.
-AUTO_FUEL_PATHS = (
-    ("hubScore", "autoFuelCount"),
-    ("hubScore", "autoFuel"),
-    ("hubScore", "autoCount"),
-    ("hubScore", "autoFuelScored"),
-    ("autoFuelCount",),
-    ("hubAutoFuelCount",),
-    ("totalAutoFuel",),
-    ("auto_fuel_count",),
-)
-
-
-TELEOP_FUEL_PATHS = (
-    ("hubScore", "teleopFuelCount"),
-    ("hubScore", "teleopFuel"),
-    ("hubScore", "teleopCount"),
-    ("hubScore", "teleopFuelScored"),
-    ("teleopFuelCount",),
-    ("hubTeleopFuelCount",),
-    ("totalTeleopFuel",),
-    ("teleop_fuel_count",),
-)
+AUTO_FUEL_PATHS = (("hubScore", "autoPoints"),)
+TELEOP_FUEL_PATHS = (("hubScore", "teleopPoints"),)
 
 
 def get_event_rankings(event_key: str) -> dict:
-    response = requests.get(
-        TBA_API_URL + f"event/{event_key}/rankings",
-        headers=HEADERS,
-        timeout=20,
+    return get_tba_json(
+        f"event/{event_key}/rankings",
+        default={"rankings": []},
+        expected_type=dict,
     )
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"TBA Error {response.status_code}: {response.text}"
-        )
-
-    return response.json()
 
 
 def get_event_matches(event_key: str) -> list[dict]:
-    response = requests.get(
-        TBA_API_URL + f"event/{event_key}/matches",
-        headers=HEADERS,
-        timeout=20,
+    return get_tba_json(
+        f"event/{event_key}/matches",
+        default=[],
+        expected_type=list,
     )
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"TBA Error {response.status_code}: {response.text}"
-        )
-
-    return response.json()
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -143,125 +98,24 @@ def _safe_bool(value: Any) -> Optional[bool]:
     return None
 
 
-def _calculate_scouting_opr(
-    average_auto_fuel: Any,
-    average_teleop_fuel: Any,
+def _calculate_scouting_fuel_contribution(
+    average_auto_fuel: Optional[float],
+    average_teleop_fuel: Optional[float],
 ) -> Optional[float]:
-    """Converts direct scouting fuel averages into an OPR contribution."""
+    """Convert complete scouting fuel averages into estimated points.
 
-    auto_fuel = _safe_float(average_auto_fuel)
-    teleop_fuel = _safe_float(average_teleop_fuel)
+    A missing phase is treated as incomplete data, not as a measured zero.
+    This is a direct scoring estimate, not an OPR calculation.
+    """
 
-    if auto_fuel is None and teleop_fuel is None:
+    if average_auto_fuel is None or average_teleop_fuel is None:
         return None
 
     return round(
-        (auto_fuel or 0.0) * SCOUTED_AUTO_FUEL_POINT_VALUE
-        + (teleop_fuel or 0.0) * SCOUTED_TELEOP_FUEL_POINT_VALUE,
+        average_auto_fuel * SCOUTED_AUTO_FUEL_POINT_VALUE
+        + average_teleop_fuel * SCOUTED_TELEOP_FUEL_POINT_VALUE,
         2,
     )
-
-
-def _fused_opr_fields(
-    tba_opr: Any,
-    tba_auto_fuel_opr: Any,
-    tba_teleop_fuel_opr: Any,
-    scouted_auto_fuel: Any,
-    scouted_teleop_fuel: Any,
-) -> dict:
-    """
-    Produces one final OPR while retaining its source components.
-
-    When TBA fuel OPR is available, only the fuel portion is blended.
-    The TBA non-fuel remainder stays intact, preserving climb/endgame and
-    any other scoring that the scouting form does not directly measure.
-    """
-
-    tba_total = _safe_float(tba_opr)
-    tba_auto_fuel = _safe_float(tba_auto_fuel_opr)
-    tba_teleop_fuel = _safe_float(tba_teleop_fuel_opr)
-    scouting_opr = _calculate_scouting_opr(
-        scouted_auto_fuel,
-        scouted_teleop_fuel,
-    )
-
-    tba_fuel_values = [
-        value
-        for value in (tba_auto_fuel, tba_teleop_fuel)
-        if value is not None
-    ]
-    tba_fuel_opr = (
-        round(sum(tba_fuel_values), 2)
-        if tba_fuel_values
-        else None
-    )
-
-    if tba_total is not None and scouting_opr is not None:
-        if tba_fuel_opr is not None:
-            tba_non_fuel_opr = round(
-                tba_total - tba_fuel_opr,
-                2,
-            )
-            fused_fuel_opr = round(
-                scouting_opr * SCOUTING_OPR_WEIGHT
-                + tba_fuel_opr * TBA_OPR_WEIGHT,
-                2,
-            )
-            fused_opr = round(
-                tba_non_fuel_opr + fused_fuel_opr,
-                1,
-            )
-            fusion_mode = "fuel_component_blend"
-        else:
-            tba_non_fuel_opr = None
-            fused_fuel_opr = None
-            fused_opr = round(
-                scouting_opr * SCOUTING_OPR_WEIGHT
-                + tba_total * TBA_OPR_WEIGHT,
-                1,
-            )
-            fusion_mode = "total_opr_fallback_blend"
-
-        scouting_weight = SCOUTING_OPR_WEIGHT
-        tba_weight = TBA_OPR_WEIGHT
-
-    elif scouting_opr is not None:
-        tba_non_fuel_opr = None
-        fused_fuel_opr = scouting_opr
-        fused_opr = round(scouting_opr, 1)
-        fusion_mode = "scouting_only"
-        scouting_weight = 1.0
-        tba_weight = 0.0
-
-    else:
-        tba_non_fuel_opr = (
-            round(tba_total - tba_fuel_opr, 2)
-            if tba_total is not None and tba_fuel_opr is not None
-            else None
-        )
-        fused_fuel_opr = tba_fuel_opr
-        fused_opr = (
-            round(tba_total, 1)
-            if tba_total is not None
-            else None
-        )
-        fusion_mode = "tba_only" if tba_total is not None else "unavailable"
-        scouting_weight = 0.0
-        tba_weight = 1.0 if tba_total is not None else 0.0
-
-    return {
-        "OPR": fused_opr,
-        "TBAOPR": round(tba_total, 1) if tba_total is not None else None,
-        "ScoutingOPR": scouting_opr,
-        "TBAFuelOPR": tba_fuel_opr,
-        "TBANonFuelOPR": tba_non_fuel_opr,
-        "FusedFuelOPR": fused_fuel_opr,
-        "OPRFusionMode": fusion_mode,
-        "OPRWeights": {
-            "scouting": round(scouting_weight, 2),
-            "tba": round(tba_weight, 2),
-        },
-    }
 
 
 def rankings(rankings_data: Any, team_key: str) -> Optional[int]:
@@ -495,6 +349,41 @@ def _solve_optional_metric(
     )
 
 
+def _complete_tba_fuel_points(alliance_row: dict) -> Optional[float]:
+    auto_fuel = _safe_float(alliance_row.get("auto_fuel"))
+    teleop_fuel = _safe_float(alliance_row.get("teleop_fuel"))
+
+    if auto_fuel is None or teleop_fuel is None:
+        return None
+
+    return auto_fuel + teleop_fuel
+
+
+def _solve_complete_fuel_opr(
+    X: np.ndarray,
+    alliance_rows: list[dict],
+) -> Optional[np.ndarray]:
+    row_indexes = [
+        index
+        for index, row in enumerate(alliance_rows)
+        if _complete_tba_fuel_points(row) is not None
+    ]
+
+    if not row_indexes:
+        return None
+
+    return solve_opr(
+        X[row_indexes],
+        np.asarray(
+            [
+                _complete_tba_fuel_points(alliance_rows[index])
+                for index in row_indexes
+            ],
+            dtype=float,
+        ),
+    )
+
+
 def _solve_snapshot(
     alliance_rows: list[dict],
 ) -> dict[int, dict]:
@@ -559,6 +448,7 @@ def _solve_snapshot(
         alliance_rows,
         "teleop_fuel",
     )
+    fuel_opr = _solve_complete_fuel_opr(X, alliance_rows)
 
     snapshot: dict[int, dict] = {}
 
@@ -577,6 +467,19 @@ def _solve_snapshot(
             "TeleopFuelOPR": (
                 round(float(teleop_fuel_opr[index]), 1)
                 if teleop_fuel_opr is not None
+                else None
+            ),
+            "TBAFuelOPR": (
+                round(float(fuel_opr[index]), 1)
+                if fuel_opr is not None
+                else None
+            ),
+            "TBANonFuelOPR": (
+                round(
+                    float(solved["score"][index] - fuel_opr[index]),
+                    1,
+                )
+                if fuel_opr is not None
                 else None
             ),
         }
@@ -684,21 +587,18 @@ def _canonical_match_key(
     if not text:
         return None
 
-    # Already a full TBA match key.
     if "_" in text and re.search(
         r"_(?:qm|ef|qf|sf|f)\d",
         text,
     ):
         return text
 
-    # qm12, sf2m1, f1m2, etc.
     if re.fullmatch(
         r"(?:qm\d+|ef\d+m\d+|qf\d+m\d+|sf\d+m\d+|f\d+m\d+)",
         text,
     ):
         return f"{event_key}_{text}" if event_key else text
 
-    # Your DB example stores qualification match 12 as "12".
     match_number = _safe_int(text)
 
     if match_number is not None:
@@ -732,7 +632,6 @@ def analyze_scout_data(
 
     scout_rows = _extract_sequence(Scoutdata)
 
-    # A single MongoDB document can be passed directly.
     if isinstance(Scoutdata, dict) and "team" in Scoutdata:
         scout_rows = [Scoutdata]
 
@@ -1026,6 +925,108 @@ def analyze_scout_data(
     return analyzed
 
 
+def _solve_combined_fuel_opr(
+    parsed_matches: list[dict],
+    scout_results: dict[int, dict],
+) -> tuple[dict[int, float], dict[int, int]]:
+    """Solve fuel OPR from TBA alliances and direct scouting equations.
+
+    TBA contributes standard alliance rows with three team coefficients.
+    Each complete scouting record contributes a one-team equation for that
+    team's observed fuel points. Source blocks are normalized before applying
+    the configured weights so one source does not dominate only because it
+    contains more rows.
+    """
+
+    alliance_rows = [
+        alliance
+        for match in parsed_matches
+        for alliance in match.get("alliances", [])
+        if isinstance(alliance, dict)
+    ]
+    teams = sorted({
+        team
+        for row in alliance_rows
+        for team in row.get("teams", [])
+        if isinstance(team, int)
+    })
+
+    if not teams:
+        return {}, {}
+
+    team_index = {team: index for index, team in enumerate(teams)}
+    tba_rows = [
+        row
+        for row in alliance_rows
+        if _complete_tba_fuel_points(row) is not None
+    ]
+    scouting_observations: list[tuple[int, float]] = []
+    scouting_counts: dict[int, int] = defaultdict(int)
+
+    for team, scouting_result in scout_results.items():
+        if team not in team_index:
+            continue
+
+        for observation in scouting_result.get("ScoutingHistory", []):
+            contribution = _calculate_scouting_fuel_contribution(
+                observation.get("AutoFuel"),
+                observation.get("TeleopFuel"),
+            )
+
+            if contribution is None:
+                continue
+
+            scouting_observations.append((team, contribution))
+            scouting_counts[team] += 1
+
+    if not tba_rows or not scouting_observations:
+        return {}, dict(scouting_counts)
+
+    tba_matrix = np.zeros((len(tba_rows), len(teams)), dtype=float)
+    tba_scores = np.zeros(len(tba_rows), dtype=float)
+
+    for row_index, row in enumerate(tba_rows):
+        for team in row.get("teams", []):
+            if team in team_index:
+                tba_matrix[row_index, team_index[team]] = 1.0
+
+        tba_scores[row_index] = float(_complete_tba_fuel_points(row))
+
+    scouting_matrix = np.zeros(
+        (len(scouting_observations), len(teams)),
+        dtype=float,
+    )
+    scouting_scores = np.zeros(len(scouting_observations), dtype=float)
+
+    for row_index, (team, contribution) in enumerate(
+        scouting_observations
+    ):
+        scouting_matrix[row_index, team_index[team]] = 1.0
+        scouting_scores[row_index] = contribution
+
+    tba_scale = np.sqrt(TBA_FUEL_WEIGHT / len(tba_rows))
+    scouting_scale = np.sqrt(
+        SCOUTING_FUEL_WEIGHT / len(scouting_observations)
+    )
+    combined_matrix = np.vstack((
+        tba_matrix * tba_scale,
+        scouting_matrix * scouting_scale,
+    ))
+    combined_scores = np.concatenate((
+        tba_scores * tba_scale,
+        scouting_scores * scouting_scale,
+    ))
+    combined_fuel_opr = solve_opr(combined_matrix, combined_scores)
+
+    return (
+        {
+            team: float(combined_fuel_opr[index])
+            for team, index in team_index.items()
+        },
+        dict(scouting_counts),
+    )
+
+
 def _build_tba_results(
     parsed_matches: list[dict],
     rankings_data: Any,
@@ -1076,6 +1077,8 @@ def _build_tba_results(
                 "Climb": current_stats["Climb"],
                 "AutoFuelOPR": current_stats["AutoFuelOPR"],
                 "TeleopFuelOPR": current_stats["TeleopFuelOPR"],
+                "TBAFuelOPR": current_stats["TBAFuelOPR"],
+                "TBANonFuelOPR": current_stats["TBANonFuelOPR"],
             })
 
     results: dict[int, dict] = {}
@@ -1180,8 +1183,6 @@ def _merge_scout_history(
 
         merged_history.append(merged_row)
 
-    # Keep scouting observations even when TBA has not produced a completed
-    # score breakdown for that match yet.
     for scout_row in scouting_match_history:
         match_key = scout_row.get("Match")
 
@@ -1202,6 +1203,8 @@ def _merge_scout_history(
             "Climb": None,
             "AutoFuelOPR": None,
             "TeleopFuelOPR": None,
+            "TBAFuelOPR": None,
+            "TBANonFuelOPR": None,
             "ScoutedAutoFuel": scout_row.get(
                 "AverageAutoFuel"
             ),
@@ -1230,8 +1233,6 @@ def _merge_scout_history(
         )
     )
 
-    # Build cumulative scouting averages so every historical OPR point is
-    # fused using all scouting information available up through that match.
     cumulative_auto_total = 0.0
     cumulative_auto_samples = 0
     cumulative_teleop_total = 0.0
@@ -1261,15 +1262,6 @@ def _merge_scout_history(
             else None
         )
 
-        fusion = _fused_opr_fields(
-            tba_opr=row.get("OPR"),
-            tba_auto_fuel_opr=row.get("AutoFuelOPR"),
-            tba_teleop_fuel_opr=row.get("TeleopFuelOPR"),
-            scouted_auto_fuel=cumulative_auto,
-            scouted_teleop_fuel=cumulative_teleop,
-        )
-
-        row.update(fusion)
         row["CumulativeScoutedAutoFuel"] = (
             round(cumulative_auto, 2)
             if cumulative_auto is not None
@@ -1309,9 +1301,11 @@ def linreg(
     Returns
     -------
     list[dict]
-        OPR/Auto/Teleop/Endgame/Climb and fuel OPR from TBA linear
-        regression, plus direct scouting averages, death rate, defense
-        rate, comments, and merged match history.
+        OPR/Auto/Teleop/Endgame/Climb from matrix least-squares regression,
+        plus direct scouting averages, death rate, defense rate, comments,
+        and merged match history. When complete group scouting and TBA fuel
+        data exist, fuel OPR is solved from a weighted system containing both
+        TBA alliance equations and group scouting equations.
     """
 
     parsed_matches = _coerce_parsed_matches(
@@ -1323,6 +1317,10 @@ def linreg(
         rankings_data,
     )
     scout_results = analyze_scout_data(Scoutdata)
+    combined_fuel_opr, scouting_fuel_counts = _solve_combined_fuel_opr(
+        parsed_matches,
+        scout_results,
+    )
     precomputed_results = _precomputed_team_rows(TBAdata)
 
     all_teams = (
@@ -1338,8 +1336,6 @@ def linreg(
         calculated = tba_results.get(team, {})
         scouted = scout_results.get(team, {})
 
-        # Extra cached fields are retained, but freshly calculated linreg
-        # fields override duplicate cached values.
         result = {
             **precomputed,
             **calculated,
@@ -1357,6 +1353,8 @@ def linreg(
         result.setdefault("Climb", None)
         result.setdefault("AutoFuelOPR", None)
         result.setdefault("TeleopFuelOPR", None)
+        result.setdefault("TBAFuelOPR", None)
+        result.setdefault("TBANonFuelOPR", None)
         result.setdefault("MatchesPlayed", 0)
         result.setdefault("MatchHistory", [])
 
@@ -1393,15 +1391,53 @@ def linreg(
             ),
         })
 
-        # Replace the public OPR with one fused value. Raw source values
-        # remain available as TBAOPR and ScoutingOPR for diagnostics.
-        result.update(_fused_opr_fields(
-            tba_opr=result.get("OPR"),
-            tba_auto_fuel_opr=result.get("AutoFuelOPR"),
-            tba_teleop_fuel_opr=result.get("TeleopFuelOPR"),
-            scouted_auto_fuel=result.get("AverageAutoFuel"),
-            scouted_teleop_fuel=result.get("AverageTeleopFuel"),
-        ))
+        tba_opr = _safe_float(result.get("OPR"))
+        tba_fuel_opr = _safe_float(result.get("TBAFuelOPR"))
+        group_fuel_opr = combined_fuel_opr.get(team)
+        scouting_fuel_contribution = (
+            _calculate_scouting_fuel_contribution(
+                result.get("AverageAutoFuel"),
+                result.get("AverageTeleopFuel"),
+            )
+        )
+
+        result["TBAOPR"] = tba_opr
+        result["ScoutingFuelContribution"] = (
+            scouting_fuel_contribution
+        )
+        result["ScoutingFuelObservations"] = (
+            scouting_fuel_counts.get(team, 0)
+        )
+
+        if (
+            tba_opr is not None
+            and tba_fuel_opr is not None
+            and group_fuel_opr is not None
+        ):
+            result["CombinedFuelOPR"] = round(group_fuel_opr, 1)
+            result["OPR"] = round(
+                tba_opr - tba_fuel_opr + group_fuel_opr,
+                1,
+            )
+            result["OPRMethod"] = (
+                "weighted_least_squares_tba_and_group_scouting"
+            )
+            result["FuelOPRWeights"] = {
+                "tba": TBA_FUEL_WEIGHT,
+                "scouting": SCOUTING_FUEL_WEIGHT,
+            }
+        else:
+            result["CombinedFuelOPR"] = tba_fuel_opr
+            result["OPR"] = tba_opr
+            result["OPRMethod"] = (
+                "least_squares_tba"
+                if tba_opr is not None
+                else "unavailable"
+            )
+            result["FuelOPRWeights"] = {
+                "tba": 1.0 if tba_opr is not None else 0.0,
+                "scouting": 0.0,
+            }
 
         result["MatchHistory"] = _merge_scout_history(
             result.get("MatchHistory", []),
@@ -1421,7 +1457,6 @@ def linreg(
     return combined_results
 
 
-# Backward-compatible wrapper for older code that only uses TBA.
 def linreg_TBA(
     event_key: str,
     matches: Optional[list[dict]] = None,

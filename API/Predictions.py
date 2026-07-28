@@ -2,18 +2,9 @@ import math
 from collections import defaultdict
 
 import numpy as np
-import requests
 
-from config import TBA_API_URL, TBA_KEY
+from tba_client import get_tba_json
 
-
-HEADERS = {
-    "X-TBA-Auth-Key": TBA_KEY,
-}
-
-# TBA uses "sf" for the double-elimination playoff bracket
-# and "f" for finals. ef/qf remain for compatibility with
-# events or seasons that expose those levels.
 PREDICTABLE_MATCH_LEVELS = {
     "qm",
     "ef",
@@ -30,58 +21,28 @@ MATCH_LEVEL_ORDER = {
     "f": 4,
 }
 
-# Number of qualification matches a team should play before its
-# individual OPR is treated as fully established.
 TEAM_MATCHES_FOR_FULL_RELIABILITY = 6
 
-# Number of completed qualification matches before the event-wide
-# model is considered to have a strong amount of training data.
 EVENT_MATCHES_FOR_FULL_RELIABILITY = 20
 
-# The model will never assume its score-margin error is lower than this.
-# This prevents unrealistically high confidence percentages.
 MINIMUM_MARGIN_ERROR = 10.0
 
-# Used when there is not enough completed data to estimate model error.
 DEFAULT_MARGIN_ERROR = 35.0
 
-# Number of folds used when testing the model against completed matches.
 CROSS_VALIDATION_FOLDS = 5
 
-# Never report absolute certainty.
 MAXIMUM_CONFIDENCE = 99.5
 
 
-# ----------------------------------------
-# FETCH MATCHES
-# ----------------------------------------
 
 def get_event_matches(event_key: str) -> list[dict]:
-    response = requests.get(
-        TBA_API_URL + f"event/{event_key}/matches",
-        headers=HEADERS,
-        timeout=20,
+    return get_tba_json(
+        f"event/{event_key}/matches",
+        default=[],
+        expected_type=list,
     )
 
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to fetch matches for {event_key}: "
-            f"{response.status_code} - {response.text}"
-        )
 
-    data = response.json()
-
-    if not isinstance(data, list):
-        raise RuntimeError(
-            f"TBA returned invalid match data for {event_key}."
-        )
-
-    return data
-
-
-# ----------------------------------------
-# MATCH HELPERS
-# ----------------------------------------
 
 def team_key_to_number(team_key: str) -> int:
     """
@@ -113,8 +74,6 @@ def get_alliance_teams(match: dict, color: str) -> list[int]:
         try:
             teams.append(team_key_to_number(team_key))
         except (TypeError, ValueError):
-            # Ignore malformed team keys instead of breaking
-            # prediction generation for the entire event.
             continue
 
     return teams
@@ -171,9 +130,6 @@ def match_sort_key(match: dict) -> tuple:
     )
 
 
-# ----------------------------------------
-# OPR CALCULATION
-# ----------------------------------------
 
 def fit_opr_from_completed_matches(
     completed_matches: list[dict],
@@ -253,9 +209,6 @@ def calculate_opr(matches: list[dict]) -> dict[int, float]:
     return fit_opr_from_completed_matches(completed_matches)
 
 
-# ----------------------------------------
-# MODEL RELIABILITY
-# ----------------------------------------
 
 def calculate_team_match_counts(
     completed_matches: list[dict],
@@ -309,8 +262,6 @@ def append_margin_errors(
 
         all_teams = red_teams + blue_teams
 
-        # Do not evaluate a held-out match unless every team has an
-        # OPR value from the training matches.
         if any(team not in oprs for team in all_teams):
             continue
 
@@ -400,9 +351,6 @@ def calculate_margin_rmse(
                 errors,
             )
     else:
-        # There are too few matches for useful cross-validation.
-        # Use in-sample error but heavily limit confidence through
-        # the data-reliability calculation later.
         append_margin_errors(
             completed_matches,
             final_oprs,
@@ -413,8 +361,6 @@ def calculate_margin_rmse(
         completed_matches
     )
 
-    # Use a score-dependent floor so high-scoring games do not produce
-    # unrealistic confidence from a very small estimated error.
     error_floor = max(
         MINIMUM_MARGIN_ERROR,
         average_alliance_score * 0.08,
@@ -491,9 +437,6 @@ def calculate_data_reliability(
     )
 
 
-# ----------------------------------------
-# CONFIDENCE CALCULATION
-# ----------------------------------------
 
 def normal_cdf(value: float) -> float:
     """
@@ -547,7 +490,6 @@ def calculate_match_confidence(
         predicted_margin / safe_margin_rmse
     )
 
-    # Reduce confidence when limited match data is available.
     adjusted_red_probability = (
         0.5
         + (
@@ -606,9 +548,6 @@ def calculate_match_confidence(
     }
 
 
-# ----------------------------------------
-# PREDICT MATCHES
-# ----------------------------------------
 
 def predict_matches(
     matches: list[dict],
@@ -628,8 +567,6 @@ def predict_matches(
         red_teams = get_alliance_teams(match, "red")
         blue_teams = get_alliance_teams(match, "blue")
 
-        # TBA may create future playoff placeholders before
-        # their teams have been determined.
         if not red_teams or not blue_teams:
             continue
 
@@ -680,7 +617,6 @@ def predict_matches(
             "predicted_winner": predicted_winner,
             "predicted": True,
 
-            # Confidence in whichever alliance was predicted to win.
             "confidence": confidence_data["confidence"],
             "confidence_percentage": confidence_data[
                 "confidence_percentage"
@@ -689,7 +625,6 @@ def predict_matches(
                 "confidence_label"
             ],
 
-            # Estimated chance of each alliance winning.
             "red_win_probability": confidence_data[
                 "red_win_probability"
             ],
@@ -697,21 +632,16 @@ def predict_matches(
                 "blue_win_probability"
             ],
 
-            # Indicates how much match history supports this result.
             "data_reliability": confidence_data[
                 "data_reliability"
             ],
 
-            # Typical historical error in predicted score margin.
             "model_margin_rmse": round(margin_rmse, 2),
         })
 
     return predictions
 
 
-# ----------------------------------------
-# TEAM STATS FOR RANKINGS PAGE
-# ----------------------------------------
 
 def build_team_stats(
     oprs: dict[int, float],
@@ -739,9 +669,6 @@ def build_team_stats(
     ]
 
 
-# ----------------------------------------
-# MAIN PREDICTION FUNCTION
-# ----------------------------------------
 
 def predict(
     event_key: str,

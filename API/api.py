@@ -12,28 +12,27 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock, Thread
 from time import sleep
 
-from models.Matchscouting import MatchScouting
-from models.Pitscouting import Pitscouting
-from models.FollowUp import FollowUp
-from models.Groups import AddGroupEventRequest, ApproveJoinRequest, GroupCreateRequest, JoinCodeRequest, JoinGroupRequest, RemoveGroupEventRequest
+from models.match_scouting import MatchScouting
+from models.pit_scouting import Pitscouting
+from models.follow_ups import FollowUp
 from LinReg import linreg, linreg_TBA
 from Predictions import predict as predict_matches
-from config import ALLOW_ORIGINS, MONGO_URI, TBA_API_URL, TBA_KEY, KEYCLOAK_BASE_URL, KEYCLOAK_MASTER_REALM, KEYCLOAK_REALM, KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD, KEYCLOAK_ADMIN_CLIENT_ID
+from config import ALLOW_ORIGINS, MONGO_URI, KEYCLOAK_BASE_URL, KEYCLOAK_MASTER_REALM, KEYCLOAK_REALM, KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD, KEYCLOAK_ADMIN_CLIENT_ID
+from routers.data import DataDependencies, create_data_router
+from routers.groups import GroupDependencies, create_group_router
+from routers.users import UserDependencies, create_user_router
+from tba_client import DEFAULT_TBA_HEADERS, get_tba_response, parse_tba_json
 
 
 
 YEAR = "2026"
 
-# Wait this long after one cache update finishes before starting the next one.
 CACHE_UPDATE_INTERVAL_SECONDS = 300
 
-# Increment this whenever prediction-generation behavior changes.
-# Existing cached predictions with an older version will be rebuilt,
-# even when TBA returns 304 Not Modified for the event matches.
 PREDICTION_CACHE_VERSION = 4
 
-STATS_CACHE_VERSION = 3
-GROUP_STATS_CACHE_VERSION = 2
+STATS_CACHE_VERSION = 4
+GROUP_STATS_CACHE_VERSION = 3
 tags_metadata = [
     {
         "name": "default",
@@ -75,9 +74,7 @@ ROLE_PRIORITY = {
     "owner": 2
 }
 
-HEADERS = {
-    "X-TBA-Auth-Key": TBA_KEY
-}
+HEADERS = dict(DEFAULT_TBA_HEADERS)
 
 client = MongoClient(MONGO_URI)
 
@@ -113,10 +110,6 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-
-@app.get("/", tags=["default"])
-def default():
-    return {"Polar", "Forecast"}
 
 @app.post("/matchscouting", tags=["scouting"])
 def post_match_scouting(scouting_data: MatchScouting):
@@ -163,8 +156,6 @@ def post_match_scouting(scouting_data: MatchScouting):
 
     pit_status = None
     if robot_died:
-        # Recalculate from the death incidents and match-specific follow-ups.
-        # One resolved match cannot clear another unresolved match.
         pit_status = rebuild_group_pit_status(group_id, event)
 
     stats_refreshed = False
@@ -241,8 +232,6 @@ def post_pit_scouting(pit_data: Pitscouting):
             detail="Scout is not a current member of this group",
         )
 
-    # Store one consistent representation so the status cache can match
-    # both newer and older pit-scouting documents reliably.
     document["groupId"] = str(group_id)
     document["event"] = str(event)
     document["team"] = team
@@ -382,49 +371,6 @@ def post_followup(followup_data: FollowUp):
     }
 
 
-@app.get("/joincode/{group_id}", tags=["groups"])
-def joincode(group_id: str):
-    response = GroupsCollection.find_one(
-        {"group_id": group_id},
-        {"_id": 0} 
-    )
-
-    if not response:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found"
-        )
-
-    return response.get("join_code")
-
-
-@app.get("/{event}/teams", tags=["stats"])
-def teams_event(event: str):
-    doc = ETagsCollection.find_one(
-        {"key": event},
-        {"_id": 0, "teams": 1}
-    )
-
-    if not doc:
-        raise HTTPException(
-            status_code=404,
-            detail="Event not found"
-        )
-
-    return doc["teams"]
-
-@app.get("/{event}/{match}/teams", tags=["stats"])
-def teams(event: str, match: int):
-    alliances = TBACollection.find_one(
-        {"event_key": event, "match_key": f"{event}_qm{match}"},
-        {"_id": 0, "alliances": 1}
-    )
-    return {
-        "blue_teams": alliances["alliances"]["blue"]["team_keys"],
-        "red_teams": alliances["alliances"]["red"]["team_keys"]
-    }
-
-
 @app.get("/matchscouting/{group_id}/group/{username}/team/{team}/event/{event}", tags=["scouting"])
 def get_match_scouting_filtered(
     group_id: str,
@@ -432,7 +378,6 @@ def get_match_scouting_filtered(
     team: int,
     event: str
 ):
-    # --- Step 1: verify user exists in Keycloak ---
     admin_token = get_keycloak_admin_token()
 
     user_id = find_keycloak_user_id(username, admin_token)
@@ -443,7 +388,6 @@ def get_match_scouting_filtered(
             detail="User not found"
         )
 
-    # --- Step 2: verify user is in group ---
     member = GroupMembersCollection.find_one({
         "group_id": group_id,
         "user_id": user_id
@@ -455,7 +399,6 @@ def get_match_scouting_filtered(
             detail="User not in group"
         )
 
-    # --- Step 3: fetch only records submitted by current members ---
     results = get_group_match_scouting(
         group_id=group_id,
         event=event,
@@ -607,573 +550,7 @@ def get_group_pit_status(
     return document
 
 
-@app.get("/{event}/event/{team}/team", tags=["stats"])
-def team_stats(event: str, team: str):
-
-    doc = StatsCollection.find_one(
-        {"event_key": event},
-        {"_id": 0, "data": 1}
-    )
-
-    if not doc or "data" not in doc:
-        raise HTTPException(status_code=404, detail="No stats found for event")
-
-    # normalize team input
-    try:
-        team_int = int(team.replace("frc", "").strip())
-    except:
-        raise HTTPException(status_code=400, detail="Invalid team format")
-
-    # search inside event stats
-    for entry in doc["data"]:
-        if entry.get("Team") == team_int:
-            return {
-                "event": event,
-                "team": team_int,
-                "stats": entry
-            }
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Team {team_int} not found in event {event}"
-    )
-@app.get("/{event}/stats", tags=["stats"])
-def stats(
-    event: str,
-    username: str | None = None,
-):
-    data = get_stats_from_db(
-        event=event,
-        username=username,
-    )
-
-    if data is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Stats are not cached for this event yet"
-            ),
-        )
-
-    return data
-
-@app.get("/groups/{group_id}/events/{event}/stats", tags=["stats", "groups"])
-def group_event_stats(
-    group_id: str,
-    event: str,
-    username: str,
-):
-    require_username_group_member(group_id, username)
-
-    document = GroupStatsCollection.find_one(
-        {
-            "group_id": group_id,
-            "event_key": event,
-        },
-        {"_id": 0},
-    )
-
-    if document is None:
-        rebuild_group_stats(group_id, event)
-        document = GroupStatsCollection.find_one(
-            {
-                "group_id": group_id,
-                "event_key": event,
-            },
-            {"_id": 0},
-        )
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Group stats are not available for this event yet",
-        )
-
-    return document
-
-
-@app.get(
-    "/groups/{group_id}/events/{event}/teams/{team}/stats",
-    tags=["stats", "groups"],
-)
-def group_event_team_stats(
-    group_id: str,
-    event: str,
-    team: int,
-    username: str,
-):
-    require_username_group_member(group_id, username)
-
-    document = GroupStatsCollection.find_one(
-        {
-            "group_id": group_id,
-            "event_key": event,
-        },
-        {"_id": 0, "data": 1},
-    )
-
-    if document is None:
-        rebuild_group_stats(group_id, event)
-        document = GroupStatsCollection.find_one(
-            {
-                "group_id": group_id,
-                "event_key": event,
-            },
-            {"_id": 0, "data": 1},
-        )
-
-    for team_stats in (document or {}).get("data", []):
-        if team_stats.get("Team") == team:
-            return {
-                "group_id": group_id,
-                "event": event,
-                "team": team,
-                "stats": team_stats,
-            }
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Team {team} was not found in GroupStats for {event}",
-    )
-
-@app.get("/{event}/predictions", tags=["stats"])
-def predictions(event: str):
-    data = get_predictions_from_db(event)
-    if data is None:
-        
-        raise HTTPException(status_code=404, detail="Predictions are not cached for this event yet")
-
-    return data
-
-@app.get("/searchkeys", tags=["miscellaneous"])
-def search_keys(year: str = YEAR):
-    events = get_events_from_db(year)
-    return {
-        "data": [format_search_key(event, year) for event in events]
-    }
-
-
-@app.get("/cache/status", tags=["miscellaneous"])
-def cache_status(year: str = YEAR):
-    status = CacheStatusCollection.find_one({"year": str(year)}, {"_id": 0})
-    if status is None:
-        return {"year": str(year), "status": "not_started"}
-
-    return status
-
-
-@app.get("/groups/{group_name}/invite", tags=["groups"])
-def get_invite_code(group_name: str):
-
-    group = GroupsCollection.find_one({
-        "name": group_name
-    })
-
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found"
-        )
-
-    return {
-        "join_code": group["join_code"]
-    }
-
-@app.post("/groups/join", tags=["groups"])
-def join_group(request: JoinCodeRequest):
-
-    group = GroupsCollection.find_one({
-        "join_code": request.join_code.upper()
-    })
-
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Invalid join code"
-        )
-
-    admin_token = get_keycloak_admin_token()
-
-    user_id = find_keycloak_user_id(
-        request.username,
-        admin_token
-    )
-
-    if not user_id:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found"
-        )
-
-    assign_user_to_group(
-        user_id,
-        group["group_id"],
-        admin_token
-    )
-
-    # DEFAULT ROLE = MEMBER
-    GroupMembersCollection.update_one(
-        {
-            "group_id": group["group_id"],
-            "user_id": user_id
-        },
-        {
-            "$set": {
-                "group_id": group["group_id"],
-                "user_id": user_id,
-                "username": request.username,
-                "role": "member",
-                "joined_at": now_utc()
-            }
-        },
-        upsert=True
-    )
-
-    return {
-        "success": True,
-        "group_name": group["name"]
-    }
-
-
-@app.post("/groups/add-event", tags=["groups"])
-def add_group_event(req: AddGroupEventRequest):
-
-    result = GroupsCollection.update_one(
-        {"group_id": req.group_id},
-        {
-            "$addToSet": {   # prevents duplicates
-                "events": req.event_code
-            }
-        }
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    stats_refreshed = False
-    pit_status_refreshed = False
-
-    try:
-        rebuild_group_stats(req.group_id, req.event_code)
-        stats_refreshed = True
-    except Exception as error:
-        print(
-            f"Could not initialize GroupStats for "
-            f"{req.group_id}/{req.event_code}: {error}"
-        )
-
-    try:
-        rebuild_group_pit_status(req.group_id, req.event_code)
-        pit_status_refreshed = True
-    except Exception as error:
-        print(
-            f"Could not initialize GroupPitScoutingStatus for "
-            f"{req.group_id}/{req.event_code}: {error}"
-        )
-
-    return {
-        "success": True,
-        "group_stats_refreshed": stats_refreshed,
-        "pit_status_refreshed": pit_status_refreshed,
-    }
-
-
-@app.post("/groups/remove-event", tags=["groups"])
-def remove_group_event(req: RemoveGroupEventRequest):
-
-    result = GroupsCollection.update_one(
-        {"group_id": req.group_id},
-        {
-            "$pull": {
-                "events": req.event_code
-            }
-        }
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    GroupStatsCollection.delete_one({
-        "group_id": req.group_id,
-        "event_key": req.event_code,
-    })
-    GroupPitStatus.delete_one({
-        "group_id": req.group_id,
-        "event_key": req.event_code,
-    })
-    FollowUpCollection.delete_many({
-        "event": req.event_code,
-        "$or": [
-            {"groupId": req.group_id},
-            {"groupID": req.group_id},
-            {"group_id": req.group_id},
-        ],
-    })
-
-    return {"success": True}
-
-@app.get("/groups/{group_id}/events", tags=["groups"])
-def get_group_events(group_id: str):
-    group = GroupsCollection.find_one({"group_id": group_id}, {"_id": 0})
-
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    return {
-        "group_id": group_id,
-        "events": group.get("events", [])
-    }
-    
-@app.post("/groups/join-request", tags=["groups"])
-def request_join_group(request: JoinGroupRequest):
-    existing = JoinRequestsCollection.find_one({
-        "username": request.username,
-        "group_id": request.group_id,
-        "status": "pending"
-    })
-
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="Request already pending"
-        )
-
-    result = JoinRequestsCollection.insert_one({
-        "username": request.username,
-        "group_id": request.group_id,
-        "status": "pending",
-        "created_at": now_utc()
-    })
-
-    return {
-        "success": True,
-        "request_id": str(result.inserted_id)
-    }
-
-@app.get("/groups/{group_id}/requests", tags=["groups"])
-def get_group_requests(group_id: str):
-    requests = list(
-        JoinRequestsCollection.find(
-            {
-                "group_id": group_id,
-                "status": "pending"
-            },
-            {"_id": 0}
-        )
-    )
-
-    return requests
-
-@app.post("/groups/approve-request", tags=["groups"])
-def approve_join_request(request: ApproveJoinRequest):
-    join_request = JoinRequestsCollection.find_one({
-        "_id": ObjectId(request.request_id)
-    })
-
-    if not join_request:
-        raise HTTPException(
-            status_code=404,
-            detail="Request not found"
-        )
-
-    if join_request["status"] != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail="Request already processed"
-        )
-
-    admin_token = get_keycloak_admin_token()
-
-    user_id = find_keycloak_user_id(
-        join_request["username"],
-        admin_token
-    )
-
-    if not user_id:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found in Keycloak"
-        )
-
-    assign_user_to_group(
-        user_id,
-        join_request["group_id"],
-        admin_token
-    )
-
-    GroupMembersCollection.update_one(
-        {
-            "group_id": join_request["group_id"],
-            "user_id": user_id,
-        },
-        {
-            "$set": {
-                "group_id": join_request["group_id"],
-                "user_id": user_id,
-                "username": join_request["username"],
-                "role": "member",
-                "joined_at": now_utc(),
-            }
-        },
-        upsert=True,
-    )
-
-    JoinRequestsCollection.update_one(
-        {"_id": join_request["_id"]},
-        {
-            "$set": {
-                "status": "approved",
-                "approved_at": now_utc()
-            }
-        }
-    )
-
-    return {
-        "success": True
-    }
-
-@app.post('/groups/set-role', tags=['groups'])
-def set_user_role(
-    group_id: str,
-    username: str,
-    new_role: str,
-    requester_username: str,
-):
-    if new_role not in ['member', 'admin']:
-        raise HTTPException(status_code=400, detail='Invalid role')
-
-    admin_token = get_keycloak_admin_token()
-
-    requester_id = find_keycloak_user_id(
-        requester_username,
-        admin_token,
-    )
-
-    if not requester_id:
-        raise HTTPException(status_code=401, detail='Requester not found')
-
-    requester = GroupMembersCollection.find_one({
-        'group_id': group_id,
-        'user_id': requester_id,
-    })
-
-    if not requester:
-        raise HTTPException(
-            status_code=403,
-            detail='Requester is not in this group',
-        )
-
-    if requester.get('role') != 'owner':
-        raise HTTPException(
-            status_code=403,
-            detail='Only the group owner can change member roles',
-        )
-
-    user_id = find_keycloak_user_id(username, admin_token)
-
-    if not user_id:
-        raise HTTPException(status_code=404, detail='User not found')
-
-    member = GroupMembersCollection.find_one({
-        'group_id': group_id,
-        'user_id': user_id,
-    })
-
-    if not member:
-        raise HTTPException(status_code=404, detail='User not in group')
-
-    if member.get('role') == 'owner':
-        raise HTTPException(
-            status_code=403,
-            detail='The owner role cannot be changed',
-        )
-
-    GroupMembersCollection.update_one(
-        {
-            'group_id': group_id,
-            'user_id': user_id,
-        },
-        {
-            '$set': {
-                'role': new_role,
-            }
-        },
-    )
-
-    return {
-        'success': True,
-        'username': username,
-        'new_role': new_role,
-    }
-
-@app.get("/groups/{group_id}/members", tags=["groups"])
-def get_group_members(group_id: str):
-
-    members = list(GroupMembersCollection.find(
-        {"group_id": group_id},
-        {"_id": 0}
-    ))
-
-    grouped = {
-        "owner": [],
-        "admin": [],
-        "member": []
-    }
-
-    for m in members:
-        role = m.get("role", "member")
-        grouped.setdefault(role, []).append(m)
-
-    return grouped
-
-@app.get("/user/group", tags=["groups"])
-def get_user_group(username: str):
-
-    member = GroupMembersCollection.find_one(
-        {"username": username},
-        {"_id": 0}
-    )
-
-    if not member:
-        raise HTTPException(status_code=404, detail="User not in any group")
-
-    group = GroupsCollection.find_one(
-        {"group_id": member["group_id"]},
-        {"_id": 0}
-    )
-
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    return {
-        "group_id": member["group_id"],
-        "name": group["name"],
-        "role": member["role"]
-    }
-    
-@app.post("/groups/reject-request", tags=["groups"])
-def reject_join_request(request: ApproveJoinRequest):
-    result = JoinRequestsCollection.update_one(
-        {"_id": ObjectId(request.request_id)},
-        {
-            "$set": {
-                "status": "rejected",
-                "rejected_at": now_utc()
-            }
-        }
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(
-            status_code=404,
-            detail="Request not found"
-        )
-
-    return {"success": True}
-
 def ensure_database_indexes():
-    # Created at startup so importing this module does not require an
-    # immediate MongoDB round trip.
     GroupStatsCollection.create_index(
         [("group_id", 1), ("event_key", 1)],
         unique=True,
@@ -1254,9 +631,6 @@ def _scout_info_matches_member_sets(
         else None
     )
 
-    # Older scouting records may store the username inside userId, while
-    # newer ones may store the Keycloak UUID. Accept either representation,
-    # but only when it resolves to a current GroupMembers row.
     return any((
         scout_user_id in member_user_ids,
         scout_user_id in member_usernames,
@@ -1436,8 +810,6 @@ def get_event_team_numbers(event: str) -> list[int]:
         if team_number is not None:
             team_numbers.add(team_number)
 
-    # Fall back to cached matches when the event team list has not been
-    # fetched yet. This also keeps the checklist usable during cache startup.
     if not team_numbers:
         matches = TBACollection.find(
             {"event_key": event},
@@ -1950,8 +1322,6 @@ def save_group_stats(
         },
         {
             "$set": {
-                # Keep both forms because match scouting currently uses
-                # groupId while the rest of the backend uses group_id.
                 "group_id": group_id,
                 "groupId": group_id,
                 "event_key": event,
@@ -2028,8 +1398,6 @@ def group_ids_for_event(event: str) -> list[str]:
         if group_id
     }
 
-    # Also rebuild groups with existing scouting data, even if an older
-    # group document did not yet store the event in its events array.
     group_ids.update({
         str(group_id)
         for group_id in MatchScoutingCollection.distinct(
@@ -2082,7 +1450,6 @@ def refresh_group_stats_for_event(
     refreshed = 0
 
     for group_id in group_ids_for_event(event):
-        # Ignore scouting records whose group was deleted.
         if not GroupsCollection.find_one(
             {"group_id": group_id},
             {"_id": 1},
@@ -2167,18 +1534,37 @@ def fetch_tba_json(path: str, cache_key: str, cached_data=None):
     if etag_document and etag_document.get("etag"):
         headers["If-None-Match"] = etag_document["etag"]
 
-    response = requests.get(TBA_API_URL + path, headers=headers, timeout=20)
+    response = get_tba_response(
+        path,
+        headers=headers,
+        allowed_status_codes=(200, 304),
+    )
+
+    if response is None:
+        return (
+            cached_data if cached_data is not None else [],
+            False,
+        )
 
     if response.status_code == 304 and cached_data is not None:
         return cached_data, False
 
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"TBA Error {response.status_code}: {response.text}",
+    if response.status_code == 304:
+        return [], False
+
+    data = parse_tba_json(
+        response,
+        path,
+        default=None,
+        expected_type=list,
+    )
+
+    if data is None:
+        return (
+            cached_data if cached_data is not None else [],
+            False,
         )
 
-    data = response.json()
     save_etag(cache_key, response.headers.get("ETag"))
     return data, True
 
@@ -2190,8 +1576,11 @@ def get_events_from_db(year: str = YEAR):
     if cached_events is not None:
         return cached_events
 
-    events, _ = fetch_tba_json(f"events/{year}", f"events/{year}")
-    save_collection_data(EventsCollection, query, events)
+    events, changed = fetch_tba_json(f"events/{year}", f"events/{year}")
+
+    if changed:
+        save_collection_data(EventsCollection, query, events)
+
     return events
 
 
@@ -2204,7 +1593,7 @@ def fetch_events(year: str = YEAR):
         cached_data=cached_events,
     )
 
-    if changed or cached_events is None:
+    if changed:
         save_collection_data(EventsCollection, query, events)
 
     return events
@@ -2244,20 +1633,22 @@ def seed_event_etags(events):
 
 
         if existing.get("teams") is None:
-            try:
-                team_resp = requests.get(
-                    f"{TBA_API_URL}/event/{event_key}/teams",
-                    headers=HEADERS,
-                    timeout=20,
+            path = f"event/{event_key}/teams"
+            team_response = get_tba_response(path)
+
+            if team_response is not None:
+                teams_json = parse_tba_json(
+                    team_response,
+                    path,
+                    default=None,
+                    expected_type=list,
                 )
 
-                if team_resp.status_code == 200:
-                    teams_json = team_resp.json()
-
+                if teams_json is not None:
                     team_keys = [
                         team["key"]
                         for team in teams_json
-                        if "key" in team
+                        if isinstance(team, dict) and "key" in team
                     ]
 
                     ETagsCollection.update_one(
@@ -2265,13 +1656,10 @@ def seed_event_etags(events):
                         {
                             "$set": {
                                 "teams": team_keys,
-                                "teams_etag": team_resp.headers.get("ETag", "")
+                                "teams_etag": team_response.headers.get("ETag", "")
                             }
                         }
                     )
-
-            except Exception as e:
-                print(f"Teams fetch failed for {event_key}: {e}")
 
         if existing.get("event") != event:
             ETagsCollection.update_one(
@@ -2279,7 +1667,6 @@ def seed_event_etags(events):
                 {"$set": {"up_to_date": False}},
             )
 
-        # Rebuild each group's checklist after the event team list is known.
         refresh_group_pit_status_for_event(event_key)
 
 
@@ -2359,7 +1746,6 @@ def build_and_save_event(event: str, matches, rankings_data):
     predictions during the same cache update.
     """
 
-    # Save the exact match data used by this cache update first.
     save_tba_matches(event, matches)
 
     stats_data = linreg_TBA(
@@ -2369,11 +1755,8 @@ def build_and_save_event(event: str, matches, rankings_data):
     )
     save_event_stats(event, stats_data)
 
-    # Predictions are refreshed every time the stats are refreshed.
     predictions_data = refresh_event_predictions(event, matches)
 
-    # Each group receives the same TBA regression, combined only with
-    # scouting records submitted by that group's current members.
     refresh_group_stats_for_event(
         event=event,
         matches=matches,
@@ -2383,17 +1766,6 @@ def build_and_save_event(event: str, matches, rankings_data):
     return stats_data, predictions_data
 
 
-def tba_get(path: str, headers):
-    response = requests.get(TBA_API_URL + path, headers=headers, timeout=20)
-    if response.status_code not in [200, 304]:
-        raise HTTPException(
-            status_code=502,
-            detail=f"TBA Error {response.status_code}: {response.text}",
-        )
-
-    return response
-
-
 def update_event_cache(event_document):
     event_key = event_document["key"]
     headers = dict(HEADERS)
@@ -2401,10 +1773,15 @@ def update_event_cache(event_document):
     if event_document.get("etag"):
         headers["If-None-Match"] = event_document["etag"]
 
-    match_response = tba_get(
-        f"event/{event_key}/matches",
-        headers,
+    match_path = f"event/{event_key}/matches"
+    match_response = get_tba_response(
+        match_path,
+        headers=headers,
+        allowed_status_codes=(200, 304),
     )
+
+    if match_response is None:
+        return False
 
     stats_document = StatsCollection.find_one(
         {"event_key": event_key},
@@ -2434,8 +1811,6 @@ def update_event_cache(event_document):
         == PREDICTION_CACHE_VERSION
     )
 
-    # Only skip rebuilding if both cached structures
-    # use the latest versions.
     if (
         match_response.status_code == 304
         and event_document.get("up_to_date")
@@ -2452,27 +1827,40 @@ def update_event_cache(event_document):
         )
         return
 
-    # TBA data did not change, but our local calculation
-    # code or cache format changed. Fetch the data again
-    # without If-None-Match so it can be recalculated.
     if match_response.status_code == 304:
-        match_response = tba_get(
-            f"event/{event_key}/matches",
-            dict(HEADERS),
+        match_response = get_tba_response(
+            match_path,
+            headers=dict(HEADERS),
         )
 
-    matches = match_response.json()
+        if match_response is None:
+            return False
 
-    ranking_response = tba_get(
-        f"event/{event_key}/rankings",
-        dict(HEADERS),
+    matches = parse_tba_json(
+        match_response,
+        match_path,
+        default=None,
+        expected_type=list,
     )
 
-    rankings_data = (
-        ranking_response.json()
-        if ranking_response.status_code == 200
-        else {"rankings": []}
+    if matches is None:
+        return False
+
+    ranking_path = f"event/{event_key}/rankings"
+    ranking_response = get_tba_response(
+        ranking_path,
+        headers=dict(HEADERS),
     )
+
+    rankings_data = {"rankings": event_document.get("rankings", [])}
+
+    if ranking_response is not None:
+        rankings_data = parse_tba_json(
+            ranking_response,
+            ranking_path,
+            default=rankings_data,
+            expected_type=dict,
+        )
 
     stats_data, predictions_data = build_and_save_event(
         event_key,
@@ -2511,6 +1899,8 @@ def update_event_cache(event_document):
         {"key": event_key},
         {"$set": updates},
     )
+
+    return True
 
 def update_database(year: str = YEAR):
     events = fetch_events(year)
@@ -2624,48 +2014,6 @@ def create_keycloak_group(name: str, token: str):
     return _extract_group_id_from_location(response.headers.get("Location"))
 
 
-@app.post("/groups", tags=["groups"])
-def api_create_group(group: GroupCreateRequest):
-    admin_token = get_keycloak_admin_token()
-
-    group_id = create_keycloak_group(
-        group.name,
-        admin_token
-    )
-
-    join_code = generate_join_code()
-
-    # Save group metadata
-    GroupsCollection.insert_one({
-        "group_id": group_id,
-        "name": group.name,
-        "join_code": join_code,
-        "created_at": now_utc()
-    })
-
-    owner_user_id = None
-
-    # If creator exists, assign as OWNER
-    if group.username:
-        owner_user_id = find_keycloak_user_id(group.username, admin_token)
-
-        if owner_user_id:
-            assign_user_to_group(owner_user_id, group_id, admin_token)
-
-            GroupMembersCollection.insert_one({
-                "group_id": group_id,
-                "user_id": owner_user_id,
-                "username": group.username,
-                "role": "owner",
-                "joined_at": now_utc()
-            })
-
-    return {
-        "success": True,
-        "group_id": group_id,
-        "join_code": join_code
-    }
-
 def format_datetime_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -2706,11 +2054,9 @@ def set_cache_status(
     if error:
         update["error"] = error
     else:
-        # Remove an old error after a later update succeeds or starts again.
         fields_to_unset["error"] = ""
 
     if status == "running":
-        # The previously scheduled time is no longer relevant once this run starts.
         fields_to_unset["next_update_at"] = ""
         fields_to_unset["next_update_at_display"] = ""
 
@@ -2773,7 +2119,6 @@ def run_update_database_background(year: str = YEAR):
                 f"Retrying at {format_datetime_utc(next_update_at)}"
             )
 
-        # The next update starts only after the previous one has fully finished.
         sleep(CACHE_UPDATE_INTERVAL_SECONDS)
 
 
@@ -2858,8 +2203,6 @@ def get_stats_from_db(
                     ):
                         return group_stats
 
-    # Logged out, no group, event not added to group,
-    # or no group scouting data.
     return collection_data(
         StatsCollection,
         {
@@ -2909,3 +2252,45 @@ def require_role(group_id: str, user_id: str, allowed_roles: list):
     
 def can_manage(actor_role: str, target_role: str):
     return ROLE_PRIORITY.get(actor_role, 0) > ROLE_PRIORITY.get(target_role, 0)
+
+
+app.include_router(create_data_router(DataDependencies(
+    etags_collection=ETagsCollection,
+    tba_collection=TBACollection,
+    stats_collection=StatsCollection,
+    group_stats_collection=GroupStatsCollection,
+    cache_status_collection=CacheStatusCollection,
+    year=YEAR,
+    get_stats_from_db=get_stats_from_db,
+    require_username_group_member=require_username_group_member,
+    rebuild_group_stats=rebuild_group_stats,
+    get_predictions_from_db=get_predictions_from_db,
+    get_events_from_db=get_events_from_db,
+    format_search_key=format_search_key,
+)))
+
+app.include_router(create_group_router(GroupDependencies(
+    groups_collection=GroupsCollection,
+    group_members_collection=GroupMembersCollection,
+    group_stats_collection=GroupStatsCollection,
+    group_pit_status_collection=GroupPitStatus,
+    follow_up_collection=FollowUpCollection,
+    rebuild_group_stats=rebuild_group_stats,
+    rebuild_group_pit_status=rebuild_group_pit_status,
+    get_keycloak_admin_token=get_keycloak_admin_token,
+    create_keycloak_group=create_keycloak_group,
+    generate_join_code=generate_join_code,
+    find_keycloak_user_id=find_keycloak_user_id,
+    assign_user_to_group=assign_user_to_group,
+    now_utc=now_utc,
+)))
+
+app.include_router(create_user_router(UserDependencies(
+    group_members_collection=GroupMembersCollection,
+    groups_collection=GroupsCollection,
+    join_requests_collection=JoinRequestsCollection,
+    get_keycloak_admin_token=get_keycloak_admin_token,
+    find_keycloak_user_id=find_keycloak_user_id,
+    assign_user_to_group=assign_user_to_group,
+    now_utc=now_utc,
+)))
