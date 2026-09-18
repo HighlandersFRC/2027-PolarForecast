@@ -701,7 +701,7 @@ class _$FollowUpIncidentImpl implements _FollowUpIncident {
       @JsonKey(name: 'report_count') required this.reportCount,
       @JsonKey(name: 'death_reports')
       final List<DeathReport> deathReports = const <DeathReport>[],
-      this.followup})
+      this.followup = const FollowUpResolution()})
       : _deathReports = deathReports;
 
   factory _$FollowUpIncidentImpl.fromJson(Map<String, dynamic> json) =>
@@ -734,6 +734,7 @@ class _$FollowUpIncidentImpl implements _FollowUpIncident {
   }
 
   @override
+  @JsonKey()
   final FollowUpResolution? followup;
 
   @override

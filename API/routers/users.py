@@ -4,7 +4,7 @@ from typing import Any, Callable
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
-from API.models.group import ApproveJoinRequest, JoinCodeRequest, JoinGroupRequest
+from models.group import ApproveJoinRequest, JoinCodeRequest, JoinGroupRequest
 
 
 @dataclass(frozen=True)

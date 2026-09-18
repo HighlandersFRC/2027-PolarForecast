@@ -11,8 +11,8 @@ class FollowUp with _$FollowUp {
     required String event,
     required String match,
     required int team,
-    required ScoutInfo scoutInfo,
-   required String groupId,
+    @JsonKey(name: 'scout_info') required ScoutInfo scoutInfo,
+    @JsonKey(name: 'groupID') required String groupId,
     required FollowUpData data,
   }) = _FollowUp;
 
@@ -34,17 +34,17 @@ class FollowUpData with _$FollowUpData {
 @freezed
 class FollowUpIncident with _$FollowUpIncident {
   const factory FollowUpIncident({
-  required String incidentId,
+    @JsonKey(name: 'incident_id') required String incidentId,
     required String event,
     required int team,
     required String match,
-    required String matchKey,
+    @JsonKey(name: 'match_key') required String matchKey,
     required bool resolved,
-   required int reportCount,
-    
+    @JsonKey(name: 'report_count') required int reportCount,
     @Default(<DeathReport>[])
+    @JsonKey(name: 'death_reports')
     List<DeathReport> deathReports,
-    FollowUpResolution? followup,
+    @Default(FollowUpResolution()) FollowUpResolution? followup,
   }) = _FollowUpIncident;
 
   factory FollowUpIncident.fromJson(Map<String, dynamic> json) =>
@@ -55,9 +55,9 @@ class FollowUpIncident with _$FollowUpIncident {
 class DeathReport with _$DeathReport {
   const factory DeathReport({
     @Default('') String comments,
-    String scoutName,
-    String scoutUsername,
-    String? submittedAt,
+    @Default('Unknown') @JsonKey(name: 'scout_name') String scoutName,
+    @Default('') @JsonKey(name: 'scout_username') String scoutUsername,
+    @JsonKey(name: 'submitted_at') String? submittedAt,
   }) = _DeathReport;
 
   factory DeathReport.fromJson(Map<String, dynamic> json) =>
@@ -69,8 +69,8 @@ class FollowUpResolution with _$FollowUpResolution {
   const factory FollowUpResolution({
     @Default('') String severity,
     @Default('') String comments,
-    String scoutName,
-    String? submittedAt,
+    @Default('Unknown') @JsonKey(name: 'scout_name') String scoutName,
+    @JsonKey(name: 'submitted_at') String? submittedAt,
   }) = _FollowUpResolution;
 
   factory FollowUpResolution.fromJson(Map<String, dynamic> json) =>

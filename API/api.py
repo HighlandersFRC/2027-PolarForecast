@@ -17,7 +17,18 @@ from models.pit_scouting import Pitscouting
 from models.follow_ups import FollowUp
 from LinReg import linreg, linreg_TBA
 from Predictions import predict as predict_matches
-from config import ALLOW_ORIGINS, MONGO_URI, KEYCLOAK_BASE_URL, KEYCLOAK_MASTER_REALM, KEYCLOAK_REALM, KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD, KEYCLOAK_ADMIN_CLIENT_ID
+from config import (
+    ALLOW_ORIGINS,
+    MONGO_URI,
+    KEYCLOAK_BASE_URL,
+    KEYCLOAK_MASTER_REALM,
+    KEYCLOAK_REALM,
+    KEYCLOAK_ADMIN_USERNAME,
+    KEYCLOAK_ADMIN_PASSWORD,
+    KEYCLOAK_ADMIN_CLIENT_ID,
+    KEYCLOAK_ADMIN_CLIENT_SECRET,
+)
+from keycloak_client import KeycloakAdminAuthError, request_keycloak_admin_token
 from routers.data import DataDependencies, create_data_router
 from routers.groups import GroupDependencies, create_group_router
 from routers.users import UserDependencies, create_user_router
@@ -1919,27 +1930,20 @@ def update_database(year: str = YEAR):
 
 
 def get_keycloak_admin_token() -> str:
-    token_url = f"{KEYCLOAK_BASE_URL}/realms/{KEYCLOAK_MASTER_REALM}/protocol/openid-connect/token"
-    response = requests.post(
-        token_url,
-        data={
-            "grant_type": "password",
-            "client_id": KEYCLOAK_ADMIN_CLIENT_ID,
-            "username": KEYCLOAK_ADMIN_USERNAME,
-            "password": KEYCLOAK_ADMIN_PASSWORD,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=20,
-    )
-
-    if response.status_code != 200:
+    try:
+        return request_keycloak_admin_token(
+            base_url=KEYCLOAK_BASE_URL,
+            realm=KEYCLOAK_MASTER_REALM,
+            client_id=KEYCLOAK_ADMIN_CLIENT_ID,
+            username=KEYCLOAK_ADMIN_USERNAME,
+            password=KEYCLOAK_ADMIN_PASSWORD,
+            client_secret=KEYCLOAK_ADMIN_CLIENT_SECRET,
+        )
+    except KeycloakAdminAuthError as error:
         raise HTTPException(
             status_code=502,
-            detail=f"Keycloak admin login failed: {response.status_code} {response.text}",
-        )
-
-    token_data = response.json()
-    return token_data.get("access_token")
+            detail=str(error),
+        ) from error
 
 
 def _extract_group_id_from_location(location: str | None) -> str | None:

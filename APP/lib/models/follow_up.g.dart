@@ -53,7 +53,7 @@ _$FollowUpIncidentImpl _$$FollowUpIncidentImplFromJson(
               .toList() ??
           const <DeathReport>[],
       followup: json['followup'] == null
-          ? null
+          ? const FollowUpResolution()
           : FollowUpResolution.fromJson(
               json['followup'] as Map<String, dynamic>),
     );

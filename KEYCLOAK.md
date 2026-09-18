@@ -8,7 +8,7 @@ This project includes a local Keycloak auth server for development.
 - Admin console: `http://localhost:8000/admin`
 - Admin username: `admin`
 - Admin password: `admin`
-- Realm: `polarforecast`
+- Realm: `polarforecast-web`
 - App client ID: `polarforecast-app`
 - Demo user: `demo`
 - Demo user password: `demo`
@@ -49,7 +49,8 @@ docker compose down
 
 ## Reset Everything
 
-If you want to delete all saved Keycloak data and re-import the default realm:
+For a disposable local environment, this deletes all saved Keycloak **and
+MongoDB** data, then re-imports the default realm:
 
 ```powershell
 docker compose down -v
@@ -71,13 +72,28 @@ docker compose up --build
 Use these values when wiring your app to Keycloak:
 
 ```text
-Issuer: http://localhost:8000/realms/polarforecast
-Authorization endpoint: http://localhost:8000/realms/polarforecast/protocol/openid-connect/auth
-Token endpoint: http://localhost:8000/realms/polarforecast/protocol/openid-connect/token
-JWKS endpoint: http://localhost:8000/realms/polarforecast/protocol/openid-connect/certs
+Issuer: http://localhost:8000/realms/polarforecast-web
+Authorization endpoint: http://localhost:8000/realms/polarforecast-web/protocol/openid-connect/auth
+Token endpoint: http://localhost:8000/realms/polarforecast-web/protocol/openid-connect/token
+JWKS endpoint: http://localhost:8000/realms/polarforecast-web/protocol/openid-connect/certs
 Client ID: polarforecast-app
 PKCE: S256
 ```
 
 The `polarforecast-app` client is public and configured for local development redirects from `localhost` and `127.0.0.1`.
+
+## API Admin Client
+
+The API obtains its management token from the `master` realm. The default
+development setup uses Keycloak's public `admin-cli` client, so
+`KEYCLOAK_ADMIN_CLIENT_SECRET` must be blank.
+
+If a deployment replaces `admin-cli` with a confidential client (the Keycloak
+console shows **Client authentication: On**), copy that client's Credentials-tab
+secret into `KEYCLOAK_ADMIN_CLIENT_SECRET`. An incorrect client ID, realm, or
+secret causes Keycloak's `invalid_client` response.
+
+Changes to bootstrap credentials only affect a new Keycloak database. For a
+disposable local environment that has stale client/admin settings, use the
+**Reset Everything** commands above to recreate it from the checked-in realm.
 
