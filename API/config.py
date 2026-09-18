@@ -32,6 +32,8 @@ _default_allow_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:3000",
     "http://localhost:8080",
+    "https://polarforecastfrc.com",
+    "https://polarforecastfrc.com:8443"
 ]
 
 _allow_origins_from_env = os.environ.get("ALLOW_ORIGINS", "").strip()

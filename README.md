@@ -141,6 +141,39 @@ flutter pub get
 run_frontend_locally.bat
 ```
 
+## Production API Proxy
+
+The production frontend is served from `https://polarforecastfrc.com`, and the
+Flutter build can use `https://polarforecastfrc.com:8443` as
+`APP_API_BASE_URL`. Port 8443 must terminate TLS before proxying requests to the
+Docker API's HTTP port on `127.0.0.1:8081`. For example, add a server block like
+this to the host's Ubuntu Nginx configuration, using the same certificate paths
+as the port 443 server:
+
+```nginx
+server {
+    listen 8443 ssl;
+    listen [::]:8443 ssl;
+    server_name polarforecastfrc.com;
+
+    ssl_certificate /etc/letsencrypt/live/polarforecastfrc.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/polarforecastfrc.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+Allow inbound TCP port 8443 in both the machine firewall and the cloud network
+security group. After changing Nginx, validate and reload it with
+`sudo nginx -t` and `sudo systemctl reload nginx`.
+
 ## Stopping the Application
 
 Stop the backend and frontend by pressing:
