@@ -3,7 +3,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
 
-from models.groups import (
+from API.models.group import (
     AddGroupEventRequest,
     GroupCreateRequest,
     RemoveGroupEventRequest,
