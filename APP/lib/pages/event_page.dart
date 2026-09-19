@@ -308,6 +308,12 @@ class _EventPageState extends State<EventPage> {
           child: FutureBuilder<EventData>(
             future: _eventData,
             builder: (context, snapshot) {
+              // Event stats refresh independently of the active scouting form.
+              // Replacing it with loading/error UI would dispose its draft.
+              if (_selectedIndex == 4) {
+                return const MatchScouting();
+              }
+
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const _PageLoadingState();
               }
@@ -472,8 +478,6 @@ class _EventPageState extends State<EventPage> {
           groupId: _pitGroupId,
           username: _statsUsername,
         );
-      case 4:
-        return MatchScouting();
       case 5:
         final username = _statsUsername;
         final groupId = _pitGroupId;
