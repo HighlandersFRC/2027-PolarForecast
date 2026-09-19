@@ -21,14 +21,10 @@ from config import (
     ALLOW_ORIGINS,
     MONGO_URI,
     KEYCLOAK_BASE_URL,
-    KEYCLOAK_MASTER_REALM,
     KEYCLOAK_REALM,
-    KEYCLOAK_ADMIN_USERNAME,
-    KEYCLOAK_ADMIN_PASSWORD,
     KEYCLOAK_ADMIN_CLIENT_ID,
     KEYCLOAK_ADMIN_CLIENT_SECRET,
 )
-from keycloak_client import KeycloakAdminAuthError, request_keycloak_admin_token
 from routers.data import DataDependencies, create_data_router
 from routers.groups import GroupDependencies, create_group_router
 from routers.users import UserDependencies, create_user_router
@@ -1930,20 +1926,77 @@ def update_database(year: str = YEAR):
 
 
 def get_keycloak_admin_token() -> str:
+    """Authenticate the backend's Keycloak service account with OIDC."""
+    token_url = (
+        f"{KEYCLOAK_BASE_URL.rstrip('/')}/realms/{KEYCLOAK_REALM}"
+        "/protocol/openid-connect/token"
+    )
+
     try:
-        return request_keycloak_admin_token(
-            base_url=KEYCLOAK_BASE_URL,
-            realm=KEYCLOAK_MASTER_REALM,
-            client_id=KEYCLOAK_ADMIN_CLIENT_ID,
-            username=KEYCLOAK_ADMIN_USERNAME,
-            password=KEYCLOAK_ADMIN_PASSWORD,
-            client_secret=KEYCLOAK_ADMIN_CLIENT_SECRET,
+        response = requests.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": KEYCLOAK_ADMIN_CLIENT_ID,
+                "client_secret": KEYCLOAK_ADMIN_CLIENT_SECRET,
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=20,
         )
-    except KeycloakAdminAuthError as error:
+    except requests.RequestException as error:
         raise HTTPException(
             status_code=502,
-            detail=str(error),
+            detail=f"Could not reach Keycloak token endpoint: {error}",
         ) from error
+
+    try:
+        response_data = response.json()
+    except ValueError:
+        response_data = {}
+
+    if response.status_code != 200:
+        error_code = response_data.get("error")
+        error_description = response_data.get("error_description")
+
+        if error_code == "invalid_client":
+            reason = (
+                "Keycloak rejected the admin service client. Verify "
+                "KEYCLOAK_ADMIN_CLIENT_ID and "
+                "KEYCLOAK_ADMIN_CLIENT_SECRET."
+            )
+        elif error_code == "unauthorized_client":
+            reason = (
+                "The Keycloak client is not allowed to use service-account "
+                "authentication. Enable Service accounts roles for it."
+            )
+        else:
+            reason = (
+                error_description
+                or error_code
+                or "Keycloak returned a non-JSON error response."
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Keycloak service-account authentication failed "
+                f"({response.status_code}): {reason}"
+            ),
+        )
+
+    access_token = response_data.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Keycloak service-account response did not contain an "
+                "access_token."
+            ),
+        )
+
+    return access_token
 
 
 def _extract_group_id_from_location(location: str | None) -> str | None:
