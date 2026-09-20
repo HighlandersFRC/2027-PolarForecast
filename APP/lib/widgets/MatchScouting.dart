@@ -36,6 +36,8 @@ class _MatchScoutingState extends State<MatchScouting> {
 
   final _matchController = TextEditingController();
   final _commentsController = TextEditingController();
+  final _scrollController = ScrollController();
+  int _teamsRequestId = 0;
 
   bool _loadingTeams = false;
   bool _submitting = false;
@@ -66,6 +68,7 @@ class _MatchScoutingState extends State<MatchScouting> {
   void dispose() {
     _matchController.dispose();
     _commentsController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -120,25 +123,24 @@ class _MatchScoutingState extends State<MatchScouting> {
   // --------------------------
 
   Future<void> _loadTeams() async {
+    final requestId = ++_teamsRequestId;
     final match = int.tryParse(_matchController.text.trim());
 
-    if (match == null) {
-      setState(() {
-        _redTeams.clear();
-        _blueTeams.clear();
-      });
-      return;
-    }
+    setState(() {
+      _redTeams.clear();
+      _blueTeams.clear();
+      _loadingTeams = match != null && match > 0;
+    });
 
-    setState(() => _loadingTeams = true);
+    if (!_loadingTeams) return;
 
     try {
       final api = APIService();
 
-      final red = await api.fetchTeamsPerAllianceRed(eventCode, match);
+      final red = await api.fetchTeamsPerAllianceRed(eventCode, match!);
       final blue = await api.fetchTeamsPerAllianceBlue(eventCode, match);
 
-      if (!mounted) return;
+      if (!mounted || requestId != _teamsRequestId) return;
 
       setState(() {
         _redTeams = List<String>.from(red);
@@ -146,7 +148,7 @@ class _MatchScoutingState extends State<MatchScouting> {
         _loadingTeams = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestId != _teamsRequestId) return;
       setState(() => _loadingTeams = false);
       debugPrint(e.toString());
     }
@@ -193,8 +195,8 @@ class _MatchScoutingState extends State<MatchScouting> {
   // RESET
   // --------------------------
 
-  void _resetForm() {
-    _matchController.clear();
+  void _resetForm(int nextMatch) {
+    _matchController.text = nextMatch.toString();
     _commentsController.clear();
 
     _redTeams.clear();
@@ -206,9 +208,6 @@ class _MatchScoutingState extends State<MatchScouting> {
     _teleopFuel = 0;
     _died = false;
     _defense = false;
-
-    _selectedMode = StationMode.red1;
-    _autoPath.clear();
   }
 
   // --------------------------
@@ -216,8 +215,10 @@ class _MatchScoutingState extends State<MatchScouting> {
   // --------------------------
 
   Future<void> _submit() async {
+    if (_submitting || _loadingTeams) return;
     if (!_formKey.currentState!.validate()) return;
 
+    final match = int.parse(_matchController.text.trim());
     final team = selectedTeam;
 
     if (team == null) {
@@ -236,7 +237,7 @@ class _MatchScoutingState extends State<MatchScouting> {
       final report = MatchScouting2026(
         groupId: auth.groupId,
         event: eventCode,
-        match: _matchController.text.trim(),
+        match: match.toString(),
         team: team,
         data: Data(
           autoPath: AutoPath(path: _autoPath),
@@ -274,8 +275,16 @@ class _MatchScoutingState extends State<MatchScouting> {
         ),
       );
 
-      setState(_resetForm);
+      FocusScope.of(context).unfocus();
+      setState(() => _resetForm(match + 1));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
+      });
+      await _loadTeams();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Submission failed: $e")),
       );
@@ -380,7 +389,7 @@ class _MatchScoutingState extends State<MatchScouting> {
     required Color foregroundColor,
   }) {
     return SizedBox(
-      height: 62,
+      height: 74,
       child: FilledButton(
         onPressed: onPressed,
         style: FilledButton.styleFrom(
@@ -402,13 +411,13 @@ class _MatchScoutingState extends State<MatchScouting> {
           children: [
             Icon(
               icon,
-              size: 21,
+              size: 24,
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 17,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -533,7 +542,7 @@ class _MatchScoutingState extends State<MatchScouting> {
   }) {
     // The coordinate system is 1000 × 500.
     // Buttons scale with the rendered field width.
-    final double buttonSize = (width * 0.07).clamp(42.0, 88.0).toDouble();
+    final double buttonSize = (width * 0.08).clamp(48.0, 96.0).toDouble();
 
     return [
       _buildFieldButton(
@@ -926,8 +935,8 @@ class _MatchScoutingState extends State<MatchScouting> {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(11),
           child: Container(
-            width: 40,
-            height: 40,
+            width: 48,
+            height: 48,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(11),
@@ -1418,6 +1427,7 @@ class _MatchScoutingState extends State<MatchScouting> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SingleChildScrollView(
+        controller: _scrollController,
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
@@ -1437,12 +1447,17 @@ class _MatchScoutingState extends State<MatchScouting> {
                   children: [
                     TextFormField(
                       controller: _matchController,
+                      enabled: !_submitting,
                       keyboardType: TextInputType.number,
                       style: const TextStyle(color: Colors.white),
                       decoration: input("Match Number"),
                       onChanged: (_) => _loadTeams(),
-                      validator: (v) =>
-                          v == null || v.isEmpty ? "Enter match number" : null,
+                      validator: (value) {
+                        final match = int.tryParse(value?.trim() ?? '');
+                        return match == null || match < 1
+                            ? "Enter a valid match number"
+                            : null;
+                      },
                     ),
                     const SizedBox(height: 14),
                     Wrap(
@@ -1486,6 +1501,10 @@ class _MatchScoutingState extends State<MatchScouting> {
                         }
 
                         return ChoiceChip(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
                           label: Text(
                             label,
                             style: const TextStyle(color: Colors.white),
@@ -1499,11 +1518,13 @@ class _MatchScoutingState extends State<MatchScouting> {
                                 ? _chipColor(mode, true).withValues(alpha: 0.70)
                                 : LiquidGlassColors.border,
                           ),
-                          onSelected: (_) {
-                            setState(() {
-                              _selectedMode = mode;
-                            });
-                          },
+                          onSelected: _submitting
+                              ? null
+                              : (_) {
+                                  setState(() {
+                                    _selectedMode = mode;
+                                  });
+                                },
                         );
                       }).toList(),
                     ),
@@ -1639,7 +1660,7 @@ class _MatchScoutingState extends State<MatchScouting> {
               const SizedBox(height: 20),
 
               FilledButton.icon(
-                onPressed: _submitting ? null : _submit,
+                onPressed: _submitting || _loadingTeams ? null : _submit,
                 icon: _submitting
                     ? const SizedBox(
                         width: 20,
@@ -1657,7 +1678,7 @@ class _MatchScoutingState extends State<MatchScouting> {
                   backgroundColor: _primaryColor.withValues(alpha: 0.80),
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: _primaryColor.withValues(alpha: 0.4),
-                  minimumSize: const Size.fromHeight(58),
+                  minimumSize: const Size.fromHeight(64),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(18),
                     side: BorderSide(

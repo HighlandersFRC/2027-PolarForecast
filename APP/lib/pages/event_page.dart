@@ -1272,6 +1272,7 @@ class _StatsViewState extends State<_StatsView> {
 
   bool _ascending = true;
   bool _isExporting = false;
+  bool _showMobileAnalytics = false;
 
   @override
   void dispose() {
@@ -1588,14 +1589,58 @@ class _StatsViewState extends State<_StatsView> {
     }
 
     final visibleStats = _visibleStats;
+    final isMobile = MediaQuery.sizeOf(context).width < 720;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Column(
         children: [
-          _buildToolbar(visibleStats),
-          const SizedBox(height: 14),
-          _buildSummary(visibleStats),
+          if (isMobile) ...[
+            Semantics(
+              expanded: _showMobileAnalytics,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _showMobileAnalytics = !_showMobileAnalytics;
+                }),
+                icon: const Icon(Icons.leaderboard_rounded),
+                label: Row(
+                  children: [
+                    const Expanded(child: Text('Team Analytics')),
+                    Text('${visibleStats.length} teams'),
+                    const SizedBox(width: 8),
+                    Icon(_showMobileAnalytics
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded),
+                  ],
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0x991A2A3D),
+                  minimumSize: const Size.fromHeight(48),
+                  shape: const StadiumBorder(),
+                  side: const BorderSide(color: _borderColor),
+                ),
+              ),
+            ),
+            if (_showMobileAnalytics) ...[
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _buildToolbar(visibleStats),
+                      const SizedBox(height: 14),
+                      _buildSummary(visibleStats),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ] else ...[
+            _buildToolbar(visibleStats),
+            const SizedBox(height: 14),
+            _buildSummary(visibleStats),
+          ],
           const SizedBox(height: 14),
           Expanded(
             child: visibleStats.isEmpty

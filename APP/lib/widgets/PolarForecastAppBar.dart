@@ -496,36 +496,28 @@ class _AccountDialogState extends State<_AccountDialog> {
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final bool useColumns = constraints.maxWidth >= 520;
+        final bool compact = constraints.maxWidth < 520;
 
         final cards = [
           _buildDetailCard(
             icon: Icons.person_outline,
             label: 'Name',
             value: firstName,
+            compact: compact,
           ),
           _buildDetailCard(
             icon: Icons.alternate_email,
             label: 'Username',
             value: username,
+            compact: compact,
           ),
           _buildDetailCard(
             icon: Icons.numbers,
             label: 'FRC team',
             value: teamNumber,
+            compact: compact,
           ),
         ];
-
-        if (!useColumns) {
-          return Column(
-            children: [
-              for (int index = 0; index < cards.length; index++) ...[
-                cards[index],
-                if (index != cards.length - 1) const SizedBox(height: 10),
-              ],
-            ],
-          );
-        }
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -544,10 +536,11 @@ class _AccountDialogState extends State<_AccountDialog> {
     required IconData icon,
     required String label,
     required String value,
+    bool compact = false,
   }) {
     return Container(
-      height: 112,
-      padding: const EdgeInsets.all(16),
+      height: compact ? 96 : 112,
+      padding: EdgeInsets.all(compact ? 8 : 16),
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(16),
@@ -567,22 +560,27 @@ class _AccountDialogState extends State<_AccountDialog> {
             children: [
               Text(
                 label.toUpperCase(),
-                style: const TextStyle(
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
                   color: Colors.white38,
-                  fontSize: 10,
+                  fontSize: compact ? 9 : 10,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: 0.9,
+                  letterSpacing: compact ? 0.3 : 0.9,
                 ),
               ),
               const SizedBox(height: 5),
-              Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
+              Tooltip(
+                message: value,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: compact ? 13 : 15,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
