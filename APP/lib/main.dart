@@ -60,14 +60,15 @@ class MyApp extends StatelessWidget {
           final eventCode = uri.pathSegments[1];
 
           final team = int.parse(uri.pathSegments[2]);
-          final auth = context.read<AuthService>();
           return MaterialPageRoute(
             settings: settings,
-            builder: (_) => TeamPage(
-              eventCode: eventCode,
-              team: team,
-              groupId: auth.groupId ?? '',
-              username: auth.username ?? '',
+            builder: (_) => Consumer<AuthService>(
+              builder: (_, auth, __) => TeamPage(
+                eventCode: eventCode,
+                team: team,
+                groupId: auth.isLoggedIn ? auth.groupId ?? '' : '',
+                username: auth.isLoggedIn ? auth.username ?? '' : '',
+              ),
             ),
           );
         }

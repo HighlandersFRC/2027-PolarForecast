@@ -55,13 +55,13 @@ def create_data_router(dependencies: DataDependencies) -> APIRouter:
         }
 
     @router.get("/{event}/event/{team}/team", tags=["stats"])
-    def team_stats(event: str, team: str):
-        document = dependencies.stats_collection.find_one(
-            {"event_key": event},
-            {"_id": 0, "data": 1},
+    def team_stats(event: str, team: str, username: str | None = None):
+        data = dependencies.get_stats_from_db(
+            event=event,
+            username=username,
         )
 
-        if not document or "data" not in document:
+        if data is None:
             raise HTTPException(
                 status_code=404,
                 detail="No stats found for event",
@@ -75,7 +75,7 @@ def create_data_router(dependencies: DataDependencies) -> APIRouter:
                 detail="Invalid team format",
             ) from error
 
-        for entry in document["data"]:
+        for entry in data:
             if entry.get("Team") == team_number:
                 return {
                     "event": event,

@@ -421,8 +421,18 @@ class APIService {
     );
   }
 
-  Future<TeamStats> getTeamStats(String event, int team) async {
-    final uri = Uri.parse('$baseUrl/$event/event/$team/team');
+  Future<TeamStats> getTeamStats(
+    String event,
+    int team, {
+    String? username,
+  }) async {
+    final normalizedUsername = username?.trim();
+    final uri = Uri.parse('$baseUrl/$event/event/$team/team').replace(
+      queryParameters: {
+        if (normalizedUsername != null && normalizedUsername.isNotEmpty)
+          'username': normalizedUsername,
+      },
+    );
 
     final response = await _client.get(uri);
 

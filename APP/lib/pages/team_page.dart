@@ -5,6 +5,7 @@ import 'package:app/APIService.dart';
 import 'package:app/models/follow_up.dart';
 import 'package:app/models/team_stat.dart';
 import 'package:app/models/team_stats.dart';
+import 'package:app/services/live_data_controller.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/liquid_glass.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -105,7 +106,8 @@ class _TeamGlassInset extends StatelessWidget {
 }
 
 class _TeamPageState extends State<TeamPage> {
-  late Future<TeamStats> _futureStats;
+  final APIService _apiService = APIService();
+  late LiveDataController<TeamStats> _stats;
   late Future<List<dynamic>> _futureScouting;
   late Future<List<dynamic>> _futurePitScouting;
   late Future<List<FollowUpIncident>> _futureFollowUps;
@@ -122,25 +124,31 @@ class _TeamPageState extends State<TeamPage> {
   void initState() {
     super.initState();
 
-    _futureStats = APIService().getTeamStats(
-      widget.eventCode,
-      widget.team,
+    _stats = LiveDataController(
+      load: () => _apiService.getTeamStats(
+        widget.eventCode,
+        widget.team,
+        username: widget.username,
+      ),
     );
+    _loadScouting();
+  }
 
-    _futureScouting = APIService().getMatchScoutingByGroupTeamEvent(
+  void _loadScouting() {
+    _futureScouting = _apiService.getMatchScoutingByGroupTeamEvent(
       groupId: widget.groupId,
       username: widget.username,
       team: widget.team,
       event: widget.eventCode,
     );
 
-    _futurePitScouting = APIService().getPitScoutingByGroupTeamEvent(
+    _futurePitScouting = _apiService.getPitScoutingByGroupTeamEvent(
         groupId: widget.groupId,
         username: widget.username,
         team: widget.team,
         event: widget.eventCode);
 
-    _futureFollowUps = APIService().fetchFollowUpIncidents(
+    _futureFollowUps = _apiService.fetchFollowUpIncidents(
       groupId: widget.groupId,
       username: widget.username,
       team: widget.team,
@@ -149,10 +157,36 @@ class _TeamPageState extends State<TeamPage> {
   }
 
   @override
+  void didUpdateWidget(covariant TeamPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.eventCode != widget.eventCode ||
+        oldWidget.team != widget.team ||
+        oldWidget.username != widget.username ||
+        oldWidget.groupId != widget.groupId) {
+      _stats.refresh(replace: true);
+      _loadScouting();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stats.dispose();
+    _apiService.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: bg,
       appBar: PolarForecastAppBar(),
+      floatingActionButton: _index == 0
+          ? FloatingActionButton.small(
+              tooltip: 'Refresh team stats',
+              onPressed: () => _stats.refresh(),
+              child: const Icon(Icons.refresh),
+            )
+          : null,
       body: BackdropGroup(
         child: IndexedStack(
           index: _index,
@@ -203,9 +237,9 @@ class _TeamPageState extends State<TeamPage> {
   // STATS TAB (UI IMPROVED)
   // =========================
   Widget _buildStatsTab() {
-    return FutureBuilder<TeamStats>(
-      future: _futureStats,
-      builder: (context, snapshot) {
+    return ValueListenableBuilder<AsyncSnapshot<TeamStats>>(
+      valueListenable: _stats,
+      builder: (context, snapshot, _) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(),

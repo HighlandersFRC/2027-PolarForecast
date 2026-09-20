@@ -109,6 +109,16 @@ cache_update_thread = None
 
 app = FastAPI(openapi_tags=tags_metadata)
 
+
+@app.middleware("http")
+async def prevent_stale_api_responses(request, call_next):
+    response = await call_next(request)
+    # MongoDB is the shared cache. Browsers/proxies must not retain their own
+    # snapshots of live stats, group data, or cache status (including errors).
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOW_ORIGINS,

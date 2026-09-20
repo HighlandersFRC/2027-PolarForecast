@@ -34,7 +34,7 @@ ARG KEYCLOAK_ISSUER=http://localhost:8000/realms/polarforecast-web
 ARG REDIRECT_URI=http://localhost:3000/
 ARG POST_LOGOUT_REDIRECT_URI=http://localhost:3000/
 
-RUN flutter build web --release \
+RUN flutter build web --release --pwa-strategy=none \
     --dart-define=API_BASE_URL=${API_BASE_URL} \
     --dart-define=KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER} \
     --dart-define=REDIRECT_URI=${REDIRECT_URI} \
@@ -44,6 +44,9 @@ FROM nginx:alpine
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build/web /usr/share/nginx/html
+# Retire the offline-first worker installed by older releases. Keep this URL
+# available so existing browser registrations can update and unregister.
+COPY flutter_service_worker.js /usr/share/nginx/html/flutter_service_worker.js
 
 EXPOSE 80
 

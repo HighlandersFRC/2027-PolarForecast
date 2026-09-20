@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:app/APIService.dart';
 import 'package:app/services/auth_service.dart';
+import 'package:app/services/live_data_controller.dart';
 import 'package:app/models/event_data.dart';
 import 'package:app/models/match_prediction.dart';
 import 'package:app/models/team_stat.dart';
@@ -41,14 +42,13 @@ class _EventPageState extends State<EventPage> {
 
   final APIService _apiService = APIService();
 
-  late Future<EventData> _eventData;
+  late LiveDataController<EventData> _eventData;
   late final String _apiEventKey;
 
   Timer? _cacheTimer;
 
   Map<String, dynamic>? _cacheStatus;
   Object? _cacheStatusError;
-  String? _lastCompletedToken;
 
   int _selectedIndex = 0;
   bool _cacheStatusLoading = true;
@@ -67,7 +67,7 @@ class _EventPageState extends State<EventPage> {
     _apiEventKey = _eventKeyForApi(widget.eventCode);
 
     _loadEventName();
-    _pollCacheStatus(reloadEventOnChange: false);
+    _pollCacheStatus();
 
     _cacheTimer = Timer.periodic(
       _cachePollInterval,
@@ -88,13 +88,17 @@ class _EventPageState extends State<EventPage> {
     if (!_authStateInitialized ||
         username != _statsUsername ||
         groupId != _pitGroupId) {
-      _authStateInitialized = true;
       _statsUsername = username;
       _pitGroupId = groupId;
 
       // Logged-in users request group-aware stats. Logged-out users pass
       // null, so the backend returns the regular public event stats.
-      _eventData = _loadEvent();
+      if (_authStateInitialized) {
+        _eventData.refresh(replace: true);
+      } else {
+        _authStateInitialized = true;
+        _eventData = LiveDataController(load: _loadEvent);
+      }
     }
   }
 
@@ -129,6 +133,7 @@ class _EventPageState extends State<EventPage> {
   @override
   void dispose() {
     _cacheTimer?.cancel();
+    _eventData.dispose();
     _apiService.dispose();
     super.dispose();
   }
@@ -170,9 +175,7 @@ class _EventPageState extends State<EventPage> {
     }
   }
 
-  Future<void> _pollCacheStatus({
-    bool reloadEventOnChange = true,
-  }) async {
+  Future<void> _pollCacheStatus() async {
     if (_checkingCache) {
       return;
     }
@@ -180,15 +183,9 @@ class _EventPageState extends State<EventPage> {
     _checkingCache = true;
 
     try {
-      final status = await _apiService.fetchCacheStatus();
-      final completedToken = status['last_completed_at']?.toString();
-
-      final cacheFinishedAgain = reloadEventOnChange &&
-          _lastCompletedToken != null &&
-          completedToken != null &&
-          completedToken != _lastCompletedToken;
-
-      _lastCompletedToken = completedToken ?? _lastCompletedToken;
+      final status = await _apiService.fetchCacheStatus(
+        year: _apiEventKey.substring(0, 4),
+      );
 
       if (!mounted) {
         return;
@@ -198,10 +195,6 @@ class _EventPageState extends State<EventPage> {
         _cacheStatus = status;
         _cacheStatusError = null;
         _cacheStatusLoading = false;
-
-        if (cacheFinishedAgain) {
-          _eventData = _loadEvent();
-        }
       });
     } catch (error) {
       if (!mounted) {
@@ -222,18 +215,17 @@ class _EventPageState extends State<EventPage> {
       return;
     }
 
-    final refreshedEvent = _loadEvent();
+    final refreshedEvent = _eventData.refresh();
 
     setState(() {
       _isRefreshing = true;
-      _eventData = refreshedEvent;
       _cacheStatusLoading = _cacheStatus == null;
     });
 
     try {
       await Future.wait([
         refreshedEvent,
-        _pollCacheStatus(reloadEventOnChange: false),
+        _pollCacheStatus(),
       ]);
     } finally {
       if (mounted) {
@@ -305,9 +297,9 @@ class _EventPageState extends State<EventPage> {
           const SizedBox(height: 2),
         ],
         Expanded(
-          child: FutureBuilder<EventData>(
-            future: _eventData,
-            builder: (context, snapshot) {
+          child: ValueListenableBuilder<AsyncSnapshot<EventData>>(
+            valueListenable: _eventData,
+            builder: (context, snapshot, _) {
               // Event stats refresh independently of the active scouting form.
               // Replacing it with loading/error UI would dispose its draft.
               if (_selectedIndex == 4) {
@@ -915,7 +907,7 @@ class _CacheStatusCard extends StatelessWidget {
                     Text(
                       error != null
                           ? 'The cache status endpoint could not be reached.'
-                          : '${eventKey.toUpperCase()} automatically reloads after a completed cache update.',
+                          : '${eventKey.toUpperCase()} stats refresh every 30 seconds and when you return to the app.',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(

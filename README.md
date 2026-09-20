@@ -2,6 +2,10 @@
 
 PolarForecast is a Flutter application with a Python backend. The project uses Docker Compose for its supporting services and includes scripts for running the backend and frontend locally.
 
+If team stats differ between devices or pages, see the
+[stats consistency troubleshooting guide](docs/stats-consistency.md) for the
+root causes, deployment steps, and checks to diagnose future incidents.
+
 ## Project Structure
 
 ```text
