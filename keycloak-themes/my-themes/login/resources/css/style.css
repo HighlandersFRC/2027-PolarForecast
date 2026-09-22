@@ -1,0 +1,39 @@
+html,
+body {
+    min-height: 100vh;
+    margin: 0;
+    background: linear-gradient(135deg,
+            #0f1117 0%,
+            #151924 50%,
+            #1a1f2e 100%) !important;
+}
+
+.login-pf-page {
+    min-height: 100vh;
+    background: transparent !important;
+    background-image: none !important;
+}
+
+.card-pf {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    max-width: none !important;
+    margin: 0 auto !important;
+}
+
+.login-pf-page-header {
+    display: none !important;
+}
+
+#kc-header {
+    display: none !important;
+}
+
+#kc-header-wrapper {
+    display: none !important;
+}
+
+.login-pf-page .card-pf {
+    padding: 0 !important;
+}
