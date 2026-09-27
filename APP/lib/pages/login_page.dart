@@ -1,7 +1,7 @@
 import 'package:app/APIService.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -39,9 +39,8 @@ class _LoginPageState extends State<LoginPage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
-            child: LiquidGlassPanel(
-              tint: LiquidGlassColors.secondary,
-              blurSigma: 28,
+            child: MattePanel(
+              tint: AppColors.secondary,
               padding: const EdgeInsets.all(28),
               child: auth.isLoggedIn
                   ? SingleChildScrollView(
@@ -62,9 +61,9 @@ class _LoginPageState extends State<LoginPage> {
                                 child: Text(
                                   'Group: ${auth.group}',
                                   style: const TextStyle(
-                                    color: LiquidGlassColors.primary,
+                                    color: AppColors.primary,
                                     decoration: TextDecoration.underline,
-                                    decorationColor: LiquidGlassColors.primary,
+                                    decorationColor: AppColors.primary,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),

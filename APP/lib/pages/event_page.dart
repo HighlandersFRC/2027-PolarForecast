@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:app/APIService.dart';
 import 'package:app/services/auth_service.dart';
@@ -13,16 +12,17 @@ import 'package:app/models/team_stat.dart';
 import 'package:app/widgets/MatchScouting.dart';
 import 'package:app/widgets/PitScouting.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/DataSourceBanner.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 const Color _pageBackground = Colors.transparent;
-const Color _surfaceColor = LiquidGlassColors.glass;
-const Color _surfaceColorLight = LiquidGlassColors.glassSoft;
-const Color _borderColor = LiquidGlassColors.border;
+const Color _surfaceColor = AppColors.surface;
+const Color _surfaceColorLight = AppColors.surfaceSoft;
+const Color _borderColor = AppColors.border;
 const Color _accentColor = Color(0xFF4DA3FF);
 
 class EventPage extends StatefulWidget {
@@ -282,6 +282,7 @@ class _EventPageState extends State<EventPage> {
   }) {
     return Column(
       children: [
+        const DataSourceBanner(),
         if (showCacheCard) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -302,7 +303,7 @@ class _EventPageState extends State<EventPage> {
             builder: (context, snapshot, _) {
               // Event stats refresh independently of the active scouting form.
               // Replacing it with loading/error UI would dispose its draft.
-              if (_selectedIndex == 4) {
+              if (_selectedIndex == 5) {
                 return const MatchScouting();
               }
 
@@ -407,14 +408,12 @@ class _EventPageState extends State<EventPage> {
                   constraints: BoxConstraints(
                     maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.82,
                   ),
-                  child: LiquidGlassPanel(
+                  child: MattePanel(
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(24),
                       bottom: Radius.circular(18),
                     ),
-                    tint: LiquidGlassColors.secondary,
-                    blurSigma: 30,
-                    shadow: false,
+                    tint: AppColors.secondary,
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
                       child: Column(
@@ -470,7 +469,23 @@ class _EventPageState extends State<EventPage> {
           groupId: _pitGroupId,
           username: _statsUsername,
         );
-      case 5:
+      case 4:
+        final username = _statsUsername;
+        final groupId = _pitGroupId;
+        if (username == null || groupId == null) {
+          return const _EmptyState(
+            icon: Icons.login_rounded,
+            title: 'Login required',
+            message: 'Log in and join a group to build a shared picklist.',
+          );
+        }
+        return _PicklistView(
+          eventCode: _apiEventKey,
+          groupId: groupId,
+          username: username,
+          stats: data.stats,
+        );
+      case 6:
         final username = _statsUsername;
         final groupId = _pitGroupId;
 
@@ -507,60 +522,62 @@ class _EventPageState extends State<EventPage> {
 
   Widget _buildBottomNavigation() {
     return ClipRect(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: NavigationBar(
-          height: 72,
-          backgroundColor: _surfaceColor,
-          indicatorColor: _accentColor.withOpacity(0.16),
-          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          labelTextStyle: WidgetStateProperty.resolveWith(
-            (states) => TextStyle(
-              color: states.contains(WidgetState.selected)
-                  ? Colors.white
-                  : Colors.white60,
-              fontWeight: states.contains(WidgetState.selected)
-                  ? FontWeight.w700
-                  : FontWeight.w500,
-            ),
+      child: NavigationBar(
+        height: 72,
+        backgroundColor: _surfaceColor,
+        indicatorColor: _accentColor.withOpacity(0.16),
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected)
+                ? Colors.white
+                : Colors.white60,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w700
+                : FontWeight.w500,
           ),
-          selectedIndex: _selectedIndex,
-          onDestinationSelected: (index) {
-            setState(() => _selectedIndex = index);
-          },
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.leaderboard_outlined),
-              selectedIcon: Icon(Icons.leaderboard_rounded),
-              label: 'Current',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.insights_outlined),
-              selectedIcon: Icon(Icons.insights_rounded),
-              label: 'Predictions',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.format_list_numbered_outlined),
-              selectedIcon: Icon(Icons.format_list_numbered_rounded),
-              label: 'Quals',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.query_stats_outlined),
-              selectedIcon: Icon(Icons.query_stats_rounded),
-              label: 'Charts',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.visibility_outlined),
-              selectedIcon: Icon(Icons.visibility_rounded),
-              label: 'Match Scouting',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.assignment_outlined),
-              selectedIcon: Icon(Icons.assignment_rounded),
-              label: 'Pit Scouting',
-            ),
-          ],
         ),
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() => _selectedIndex = index);
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.leaderboard_outlined),
+            selectedIcon: Icon(Icons.leaderboard_rounded),
+            label: 'Current',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.insights_outlined),
+            selectedIcon: Icon(Icons.insights_rounded),
+            label: 'Predictions',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.format_list_numbered_outlined),
+            selectedIcon: Icon(Icons.format_list_numbered_rounded),
+            label: 'Quals',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.query_stats_outlined),
+            selectedIcon: Icon(Icons.query_stats_rounded),
+            label: 'Charts',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.playlist_add_check_circle_outlined),
+            selectedIcon: Icon(Icons.playlist_add_check_circle_rounded),
+            label: 'Picklist',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.visibility_outlined),
+            selectedIcon: Icon(Icons.visibility_rounded),
+            label: 'Match Scouting',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.assignment_outlined),
+            selectedIcon: Icon(Icons.assignment_rounded),
+            label: 'Pit Scouting',
+          ),
+        ],
       ),
     );
   }
@@ -570,113 +587,116 @@ class _EventPageState extends State<EventPage> {
     final railWidth = extended ? 220.0 : 82.0;
 
     return ClipRect(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: Container(
-          width: railWidth,
-          color: _surfaceColor,
-          child: SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
-                  child: Align(
-                    alignment:
-                        extended ? Alignment.centerLeft : Alignment.center,
-                    child: Tooltip(
-                      message: 'Refresh event data',
-                      child: IconButton.filledTonal(
-                        onPressed: _isRefreshing ? null : _refreshPage,
-                        icon: _isRefreshing
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.refresh_rounded),
+      child: Container(
+        width: railWidth,
+        color: _surfaceColor,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+                child: Align(
+                  alignment: extended ? Alignment.centerLeft : Alignment.center,
+                  child: Tooltip(
+                    message: 'Refresh event data',
+                    child: IconButton.filledTonal(
+                      onPressed: _isRefreshing ? null : _refreshPage,
+                      icon: _isRefreshing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(Icons.refresh_rounded),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildNavigationSectionLabel(
+                        label: 'Analytics',
+                        icon: Icons.analytics_outlined,
+                        extended: extended,
                       ),
-                    ),
+                      const SizedBox(height: 7),
+                      _buildNavigationRailItem(
+                        index: 0,
+                        label: 'Current',
+                        icon: Icons.leaderboard_outlined,
+                        selectedIcon: Icons.leaderboard_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 1,
+                        label: 'Predictions',
+                        icon: Icons.insights_outlined,
+                        selectedIcon: Icons.insights_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 2,
+                        label: 'Quals',
+                        icon: Icons.format_list_numbered_outlined,
+                        selectedIcon: Icons.format_list_numbered_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 3,
+                        label: 'Charts',
+                        icon: Icons.query_stats_outlined,
+                        selectedIcon: Icons.query_stats_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 4,
+                        label: 'Picklist',
+                        icon: Icons.playlist_add_check_circle_outlined,
+                        selectedIcon: Icons.playlist_add_check_circle_rounded,
+                        extended: extended,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 14,
+                        ),
+                        child: Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Colors.white.withOpacity(0.09),
+                        ),
+                      ),
+                      _buildNavigationSectionLabel(
+                        label: 'Data Collection',
+                        icon: Icons.edit_note_rounded,
+                        extended: extended,
+                      ),
+                      const SizedBox(height: 7),
+                      _buildNavigationRailItem(
+                        index: 5,
+                        label: 'Match Scouting',
+                        icon: Icons.visibility_outlined,
+                        selectedIcon: Icons.visibility_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 6,
+                        label: 'Pit Scouting',
+                        icon: Icons.assignment_outlined,
+                        selectedIcon: Icons.assignment_rounded,
+                        extended: extended,
+                      ),
+                    ],
                   ),
                 ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildNavigationSectionLabel(
-                          label: 'Analytics',
-                          icon: Icons.analytics_outlined,
-                          extended: extended,
-                        ),
-                        const SizedBox(height: 7),
-                        _buildNavigationRailItem(
-                          index: 0,
-                          label: 'Current',
-                          icon: Icons.leaderboard_outlined,
-                          selectedIcon: Icons.leaderboard_rounded,
-                          extended: extended,
-                        ),
-                        _buildNavigationRailItem(
-                          index: 1,
-                          label: 'Predictions',
-                          icon: Icons.insights_outlined,
-                          selectedIcon: Icons.insights_rounded,
-                          extended: extended,
-                        ),
-                        _buildNavigationRailItem(
-                          index: 2,
-                          label: 'Quals',
-                          icon: Icons.format_list_numbered_outlined,
-                          selectedIcon: Icons.format_list_numbered_rounded,
-                          extended: extended,
-                        ),
-                        _buildNavigationRailItem(
-                          index: 3,
-                          label: 'Charts',
-                          icon: Icons.query_stats_outlined,
-                          selectedIcon: Icons.query_stats_rounded,
-                          extended: extended,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 14,
-                          ),
-                          child: Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Colors.white.withOpacity(0.09),
-                          ),
-                        ),
-                        _buildNavigationSectionLabel(
-                          label: 'Data Collection',
-                          icon: Icons.edit_note_rounded,
-                          extended: extended,
-                        ),
-                        const SizedBox(height: 7),
-                        _buildNavigationRailItem(
-                          index: 4,
-                          label: 'Match Scouting',
-                          icon: Icons.visibility_outlined,
-                          selectedIcon: Icons.visibility_rounded,
-                          extended: extended,
-                        ),
-                        _buildNavigationRailItem(
-                          index: 5,
-                          label: 'Pit Scouting',
-                          icon: Icons.assignment_outlined,
-                          selectedIcon: Icons.assignment_rounded,
-                          extended: extended,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -850,11 +870,10 @@ class _CacheStatusCard extends StatelessWidget {
       displayKey: 'next_update_at_display',
     );
 
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(16),
       borderRadius: BorderRadius.circular(18),
       tint: statusPresentation.color,
-      blurSigma: 22,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 720;
@@ -1607,7 +1626,7 @@ class _StatsViewState extends State<_StatsView> {
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  backgroundColor: const Color(0x991A2A3D),
+                  backgroundColor: AppColors.surface,
                   minimumSize: const Size.fromHeight(48),
                   shape: const StadiumBorder(),
                   side: const BorderSide(color: _borderColor),
@@ -1649,7 +1668,7 @@ class _StatsViewState extends State<_StatsView> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0x991A2A3D),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.07),
@@ -1707,14 +1726,7 @@ class _StatsViewState extends State<_StatsView> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFF3196FF),
-                    Color(0xFF1769C2),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: const Color(0xFF356C9F),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Icon(
@@ -1829,7 +1841,7 @@ class _StatsViewState extends State<_StatsView> {
                 ),
               ),
         filled: true,
-        fillColor: const Color(0x7A152438),
+        fillColor: AppColors.surface,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
@@ -1961,7 +1973,7 @@ class _StatsViewState extends State<_StatsView> {
       constraints: const BoxConstraints(minHeight: 90),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0x991A2A3D),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: Colors.white.withOpacity(0.065),
@@ -2035,7 +2047,7 @@ class _StatsViewState extends State<_StatsView> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0x991A2A3D),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.07),
@@ -2118,7 +2130,7 @@ class _StatsViewState extends State<_StatsView> {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0x99182435),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.07),
@@ -2506,7 +2518,7 @@ class _StatsViewState extends State<_StatsView> {
         vertical: 12,
       ),
       decoration: BoxDecoration(
-        color: const Color(0x991D2B3D),
+        color: AppColors.surface,
         border: Border(
           top: BorderSide(
             color: Colors.white.withOpacity(0.055),
@@ -3623,6 +3635,412 @@ class _ChartsViewState extends State<_ChartsView> {
   }
 }
 
+class _PicklistView extends StatefulWidget {
+  final String eventCode;
+  final String groupId;
+  final String username;
+  final List<TeamStat> stats;
+
+  const _PicklistView({
+    required this.eventCode,
+    required this.groupId,
+    required this.username,
+    required this.stats,
+  });
+
+  @override
+  State<_PicklistView> createState() => _PicklistViewState();
+}
+
+class _PicklistViewState extends State<_PicklistView> {
+  final APIService _api = APIService();
+  final TextEditingController _teamController = TextEditingController();
+  final List<_PicklistEntry> _entries = [];
+  Timer? _saveTimer;
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    _teamController.dispose();
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final rows = await _api.fetchPicklist(
+        groupId: widget.groupId,
+        event: widget.eventCode,
+        username: widget.username,
+      );
+      if (!mounted) return;
+      setState(() {
+        _entries
+          ..clear()
+          ..addAll(rows.map(_PicklistEntry.fromJson));
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 450), _save);
+  }
+
+  Future<void> _save() async {
+    if (!mounted) return;
+    setState(() => _saving = true);
+    try {
+      await _api.savePicklist(
+        groupId: widget.groupId,
+        event: widget.eventCode,
+        username: widget.username,
+        teams: _entries.map((entry) => entry.toJson()).toList(),
+      );
+      if (mounted) setState(() => _error = null);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  TeamStat? _statsFor(int team) {
+    for (final item in widget.stats) {
+      if (item.Team == team) return item;
+    }
+    return null;
+  }
+
+  void _addTeam() {
+    final team = int.tryParse(_teamController.text.trim());
+    if (team == null || _statsFor(team) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a team competing at this event.')),
+      );
+      return;
+    }
+    if (_entries.any((entry) => entry.team == team)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That team is already on the picklist.')),
+      );
+      return;
+    }
+    setState(() {
+      _entries.add(_PicklistEntry(team: team));
+      _teamController.clear();
+    });
+    _scheduleSave();
+  }
+
+  Future<void> _editNote(_PicklistEntry entry) async {
+    final controller = TextEditingController(text: entry.note);
+    final note = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Team ${entry.team} notes'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 500,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Strategy, compatibility, concerns…',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (note == null || !mounted) return;
+    setState(() => entry.note = note);
+    _scheduleSave();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const _PageLoadingState();
+    if (_error != null && _entries.isEmpty) {
+      return _EmptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Could not load picklist',
+        message: _error!,
+        actionLabel: 'Try again',
+        onAction: _load,
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
+      children: [
+        _ChartCard(
+          title: 'Shared alliance picklist',
+          subtitle:
+              'Drag teams into order. Every change is saved for your scouting group.',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_saving)
+                const SizedBox(
+                  width: 17,
+                  height: 17,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                const Icon(Icons.cloud_done_rounded,
+                    color: Colors.greenAccent, size: 19),
+              const SizedBox(width: 7),
+              Text(
+                _saving ? 'Saving' : 'Saved',
+                style: const TextStyle(color: Colors.white54),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _teamController,
+                      keyboardType: TextInputType.number,
+                      onSubmitted: (_) => _addTeam(),
+                      decoration: const InputDecoration(
+                        labelText: 'Add event team',
+                        prefixIcon: Icon(Icons.tag_rounded),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    onPressed: _addTeam,
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Add'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(100, 56),
+                    ),
+                  ),
+                ],
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!,
+                    style: const TextStyle(color: Colors.orangeAccent)),
+              ],
+              const SizedBox(height: 18),
+              if (_entries.isEmpty)
+                const _ChartEmptyState(
+                  icon: Icons.playlist_add_rounded,
+                  message: 'Add a team to start the shared picklist.',
+                )
+              else
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  itemCount: _entries.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex--;
+                      final entry = _entries.removeAt(oldIndex);
+                      _entries.insert(newIndex, entry);
+                    });
+                    _scheduleSave();
+                  },
+                  itemBuilder: (context, index) {
+                    final entry = _entries[index];
+                    final stats = _statsFor(entry.team);
+                    return Padding(
+                      key: ValueKey(entry.team),
+                      padding: const EdgeInsets.only(bottom: 9),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _surfaceColorLight,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: _borderColor),
+                        ),
+                        child: Row(
+                          children: [
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Icon(Icons.drag_indicator_rounded,
+                                    color: Colors.white38),
+                              ),
+                            ),
+                            Container(
+                              width: 42,
+                              height: 42,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _accentColor.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${index + 1}',
+                                style: const TextStyle(
+                                  color: _accentColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Team ${entry.team}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    stats == null
+                                        ? 'No current stats'
+                                        : 'Rank ${stats.Rank}  •  OPR ${stats.OPR.toStringAsFixed(1)}  •  Auto ${stats.Auto.toStringAsFixed(1)}  •  Teleop ${stats.Teleop.toStringAsFixed(1)}',
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (entry.tier.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      entry.tier == 'Do not pick'
+                                          ? entry.tier
+                                          : '${entry.tier} tier',
+                                      style: TextStyle(
+                                        color: entry.tier == 'Do not pick'
+                                            ? Colors.redAccent
+                                            : _accentColor,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                  if (entry.note.isNotEmpty) ...[
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      entry.note,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            PopupMenuButton<String>(
+                              tooltip: 'Team options',
+                              icon: const Icon(Icons.more_vert_rounded),
+                              onSelected: (value) {
+                                if (value == 'note') {
+                                  _editNote(entry);
+                                } else if (value == 'remove') {
+                                  setState(() => _entries.removeAt(index));
+                                  _scheduleSave();
+                                } else {
+                                  setState(() => entry.tier = value);
+                                  _scheduleSave();
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                    value: '', child: Text('No tier')),
+                                PopupMenuItem(
+                                    value: 'A', child: Text('A tier')),
+                                PopupMenuItem(
+                                    value: 'B', child: Text('B tier')),
+                                PopupMenuItem(
+                                    value: 'C', child: Text('C tier')),
+                                PopupMenuItem(
+                                  value: 'Do not pick',
+                                  child: Text('Do not pick'),
+                                ),
+                                PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'note',
+                                  child: Text('Edit notes'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('Remove team'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PicklistEntry {
+  final int team;
+  String tier;
+  String note;
+
+  _PicklistEntry({required this.team, this.tier = '', this.note = ''});
+
+  factory _PicklistEntry.fromJson(Map<String, dynamic> json) {
+    return _PicklistEntry(
+      team: (json['team'] as num).toInt(),
+      tier: json['tier']?.toString() ?? '',
+      note: json['note']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'team': team,
+        'tier': tier,
+        'note': note,
+      };
+}
+
 class _ChartCard extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -3638,10 +4056,9 @@ class _ChartCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(16),
       borderRadius: BorderRadius.circular(18),
-      blurSigma: 18,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3923,12 +4340,10 @@ class _QualsViewState extends State<_QualsView> {
 
     return Column(
       children: [
-        LiquidGlassPanel(
+        MattePanel(
           width: double.infinity,
           borderRadius: BorderRadius.zero,
-          blurSigma: 28,
           tint: const Color(0xFF5FA8FF),
-          shadow: false,
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3939,25 +4354,11 @@ class _QualsViewState extends State<_QualsView> {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.26),
-                          _accentColor.withValues(alpha: 0.15),
-                        ],
-                      ),
+                      color: AppColors.surfaceSoft,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.24),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _accentColor.withValues(alpha: 0.24),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
                     ),
                     child: const Icon(
                       Icons.format_list_numbered_rounded,
@@ -4820,7 +5221,7 @@ class _PredictionsViewState extends State<_PredictionsView> {
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
           decoration: const BoxDecoration(
-            color: Color(0x7A17273A),
+            color: AppColors.surface,
             border: Border(
               bottom: BorderSide(
                 color: Color(0x36FFFFFF),
@@ -4875,10 +5276,10 @@ class _PredictionsViewState extends State<_PredictionsView> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0x8A24364A),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
-                        color: LiquidGlassColors.border,
+                        color: AppColors.border,
                       ),
                     ),
                     child: Text(
@@ -4916,7 +5317,7 @@ class _PredictionsViewState extends State<_PredictionsView> {
                         )
                       : null,
                   filled: true,
-                  fillColor: const Color(0x66253A50),
+                  fillColor: AppColors.surface,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 14,
@@ -4928,7 +5329,7 @@ class _PredictionsViewState extends State<_PredictionsView> {
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(13),
                     borderSide: const BorderSide(
-                      color: LiquidGlassColors.border,
+                      color: AppColors.border,
                     ),
                   ),
                   focusedBorder: OutlineInputBorder(
@@ -5282,12 +5683,10 @@ class _StageFilterChip extends StatelessWidget {
           vertical: 8,
         ),
         decoration: BoxDecoration(
-          color: selected
-              ? Colors.indigo.withOpacity(0.22)
-              : const Color(0x66263A50),
+          color: selected ? Colors.indigo.withOpacity(0.22) : AppColors.surface,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: selected ? Colors.indigo.shade300 : LiquidGlassColors.border,
+            color: selected ? Colors.indigo.shade300 : AppColors.border,
           ),
         ),
         child: Row(
@@ -5309,7 +5708,7 @@ class _StageFilterChip extends StatelessWidget {
               decoration: BoxDecoration(
                 color: selected
                     ? Colors.indigo.withOpacity(0.38)
-                    : const Color(0x66304760),
+                    : AppColors.surface,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
@@ -5364,7 +5763,7 @@ class _PredictionSectionHeader extends StatelessWidget {
             vertical: 3,
           ),
           decoration: BoxDecoration(
-            color: const Color(0x7A293E55),
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
@@ -5379,7 +5778,7 @@ class _PredictionSectionHeader extends StatelessWidget {
         const SizedBox(width: 10),
         const Expanded(
           child: Divider(
-            color: LiquidGlassColors.border,
+            color: AppColors.border,
           ),
         ),
       ],
@@ -5411,10 +5810,10 @@ class _PredictionStatCard extends StatelessWidget {
         vertical: 13,
       ),
       decoration: BoxDecoration(
-        color: const Color(0x7A20354A),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: LiquidGlassColors.border,
+          color: AppColors.border,
         ),
       ),
       child: Column(
@@ -5519,10 +5918,10 @@ class _PredictionCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0x8A1E3044),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(15),
         border: Border.all(
-          color: LiquidGlassColors.border,
+          color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
@@ -5539,10 +5938,10 @@ class _PredictionCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.fromLTRB(15, 13, 13, 13),
               decoration: const BoxDecoration(
-                color: Color(0x7A263A50),
+                color: AppColors.surface,
                 border: Border(
                   bottom: BorderSide(
-                    color: LiquidGlassColors.border,
+                    color: AppColors.border,
                   ),
                 ),
               ),
@@ -5552,7 +5951,7 @@ class _PredictionCard extends StatelessWidget {
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: const Color(0x66324962),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -5784,7 +6183,7 @@ class _PredictionCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: normalizedValue,
               minHeight: 6,
-              backgroundColor: const Color(0x7A314960),
+              backgroundColor: AppColors.surface,
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
           ),
@@ -5832,13 +6231,10 @@ class _AlliancePredictionRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color:
-            predictedWinner ? color.withOpacity(0.09) : const Color(0x7A263A50),
+        color: predictedWinner ? color.withOpacity(0.09) : AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: predictedWinner
-              ? color.withOpacity(0.36)
-              : LiquidGlassColors.border,
+          color: predictedWinner ? color.withOpacity(0.36) : AppColors.border,
         ),
       ),
       child: Row(
@@ -5916,11 +6312,10 @@ class _AlliancePredictionRow extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: isHighlighted
                             ? color.withOpacity(0.22)
-                            : const Color(0x662E455C),
+                            : AppColors.surface,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color:
-                              isHighlighted ? color : LiquidGlassColors.border,
+                          color: isHighlighted ? color : AppColors.border,
                           width: isHighlighted ? 1.4 : 1,
                         ),
                       ),

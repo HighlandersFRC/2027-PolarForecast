@@ -127,6 +127,16 @@ class CombinedOprTests(unittest.TestCase):
         self.assertEqual(results[1]["ScoutingFuelObservations"], 0)
         self.assertEqual(results[1]["OPRMethod"], "least_squares_tba")
 
+    def test_legacy_outlier_is_excluded_from_opr(self):
+        outlier = [
+            self._scouting_record(1, auto_fuel=11191.5, teleop_fuel=4),
+        ]
+        results = self._calculate(outlier)
+
+        self.assertEqual(results[1]["OPR"], 15.0)
+        self.assertEqual(results[1]["ScoutingFuelObservations"], 0)
+        self.assertIsNone(results[1]["AverageAutoFuel"])
+
 
 if __name__ == "__main__":
     unittest.main()

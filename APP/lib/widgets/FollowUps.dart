@@ -3,7 +3,7 @@ import 'package:app/models/follow_up.dart';
 import 'package:app/models/scout_info.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -193,11 +193,10 @@ class _FollowUpPageState extends State<FollowUpPage> {
             ? const Color(0xFFF87171)
             : const Color(0xFF60A5FA);
 
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(18),
       borderRadius: BorderRadius.circular(22),
       tint: color,
-      blurSigma: 16,
       child: Row(
         children: [
           Container(
@@ -254,11 +253,10 @@ class _FollowUpPageState extends State<FollowUpPage> {
   }
 
   Widget _buildEmptyState() {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 38),
       borderRadius: BorderRadius.circular(22),
-      tint: LiquidGlassColors.aqua,
-      blurSigma: 16,
+      tint: AppColors.aqua,
       child: const Column(
         children: [
           Icon(
@@ -371,22 +369,16 @@ class _FollowUpIncidentCardState extends State<_FollowUpIncidentCard> {
     final statusColor =
         incident.resolved ? const Color(0xFF4ADE80) : const Color(0xFFF87171);
 
-    return LiquidGlassPanel(
+    return MattePanel(
       borderRadius: BorderRadius.circular(22),
       tint: statusColor,
-      blurSigma: 16,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  statusColor.withOpacity(0.14),
-                  Colors.white.withOpacity(0.045),
-                ],
-              ),
+              color: AppColors.surfaceSoft,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(22),
               ),
@@ -591,12 +583,12 @@ class _FollowUpIncidentCardState extends State<_FollowUpIncidentCard> {
                       ),
                       style: FilledButton.styleFrom(
                         backgroundColor:
-                            LiquidGlassColors.primary.withValues(alpha: 0.80),
+                            AppColors.primary.withValues(alpha: 0.80),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                           side: const BorderSide(
-                            color: LiquidGlassColors.border,
+                            color: AppColors.border,
                           ),
                         ),
                       ),
@@ -625,12 +617,7 @@ class _DeathReportView extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.075),
-            Colors.white.withOpacity(0.025),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white10),
       ),
@@ -689,12 +676,7 @@ class _ResolvedFollowUpView extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF4ADE80).withOpacity(0.13),
-            Colors.white.withOpacity(0.035),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(13),
         border: Border.all(
           color: const Color(0xFF4ADE80).withOpacity(0.30),
@@ -771,7 +753,7 @@ class _ErrorState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: LiquidGlassPanel(
+        child: MattePanel(
           padding: const EdgeInsets.all(24),
           tint: const Color(0xFFF87171),
           borderRadius: BorderRadius.circular(22),

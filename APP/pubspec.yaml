@@ -44,6 +44,7 @@ dependencies:
   share_plus: ^10.0.2
   universal_html: ^2.2.4
   image_picker_for_web: ^3.0.6
+  image_picker: ^1.1.2
   csv: ^6.0.0
   syncfusion_flutter_core: ^33.1.46
   qr_code_scanner_plus: ^2.1.1

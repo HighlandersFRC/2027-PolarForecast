@@ -84,14 +84,46 @@ The `polarforecast-app` client is public and configured for local development re
 
 ## API Admin Client
 
-The API obtains its management token from the `master` realm. The default
-development setup uses Keycloak's public `admin-cli` client, so
-`KEYCLOAK_ADMIN_CLIENT_SECRET` must be blank.
+The API supports two admin authentication modes. The secret is used only by the
+Python API and must never be placed in an `APP_*` variable or compiled into the
+Flutter web app.
 
-If a deployment replaces `admin-cli` with a confidential client (the Keycloak
-console shows **Client authentication: On**), copy that client's Credentials-tab
-secret into `KEYCLOAK_ADMIN_CLIENT_SECRET`. An incorrect client ID, realm, or
-secret causes Keycloak's `invalid_client` response.
+### Local/testing: username and password
+
+The local Keycloak bootstrap admin can authenticate through the public
+`admin-cli` client in the `master` realm. No client secret is needed:
+
+```dotenv
+KEYCLOAK_ADMIN_AUTH_MODE=password
+KEYCLOAK_ADMIN_REALM=master
+KEYCLOAK_ADMIN_CLIENT_ID=admin-cli
+KEYCLOAK_ADMIN_USERNAME=admin
+KEYCLOAK_ADMIN_PASSWORD=admin
+KEYCLOAK_ADMIN_CLIENT_SECRET=
+```
+
+### Deployed web environment: service-account secret
+
+Production should use the confidential `polarforecast-api` client in the
+application realm. Enable **Client authentication** and **Service accounts
+roles**, grant its service account the required `realm-management` roles, and
+copy the Credentials-tab secret into the server environment:
+
+```dotenv
+KEYCLOAK_ADMIN_AUTH_MODE=client_credentials
+KEYCLOAK_ADMIN_REALM=polarforecast-web
+KEYCLOAK_ADMIN_CLIENT_ID=polarforecast-api
+KEYCLOAK_ADMIN_CLIENT_SECRET=replace-with-the-deployment-secret
+KEYCLOAK_ADMIN_USERNAME=
+KEYCLOAK_ADMIN_PASSWORD=
+```
+
+`KEYCLOAK_ADMIN_AUTH_MODE=auto` is also supported. It selects
+`client_credentials` when a client secret is present and `password` otherwise.
+Explicitly setting the mode is recommended for deployments.
+
+An incorrect client ID, realm, or secret causes Keycloak's `invalid_client`
+response. Incorrect local credentials cause `invalid_grant`.
 
 Changes to bootstrap credentials only affect a new Keycloak database. For a
 disposable local environment that has stale client/admin settings, use the

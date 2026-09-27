@@ -1,8 +1,6 @@
-import 'dart:ui' as ui;
-
 import 'package:app/APIService.dart';
 import 'package:app/services/auth_service.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -19,7 +17,6 @@ class PolarForecastAppBar extends StatelessWidget
     this.showAccountAction = true,
   }) : super(key: key);
 
-  static const Color _background = Color(0x7A132648);
   static const Color _accent = Color(0xFF72A7FF);
 
   @override
@@ -41,32 +38,14 @@ class PolarForecastAppBar extends StatelessWidget
       toolbarHeight: 60,
       elevation: 0,
       scrolledUnderElevation: 0,
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppColors.surface,
       foregroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       titleSpacing: isMobile ? 12 : 20,
       shape: const Border(
         bottom: BorderSide(
-          color: LiquidGlassColors.border,
+          color: AppColors.border,
           width: 1,
-        ),
-      ),
-      flexibleSpace: ClipRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-          child: const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xA62A466F),
-                  _background,
-                  Color(0x8A261E4C),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
       title: Row(
@@ -235,10 +214,10 @@ class _AccountDialogState extends State<_AccountDialog> {
   bool _isJoiningGroup = false;
   bool _isLoggingOut = false;
 
-  static const Color _background = Color(0xB3121D2C);
-  static const Color _surface = Color(0x8A1A2A3F);
-  static const Color _surfaceElevated = Color(0x7A263A50);
-  static const Color _border = LiquidGlassColors.border;
+  static const Color _background = AppColors.surface;
+  static const Color _surface = AppColors.surface;
+  static const Color _surfaceElevated = AppColors.surface;
+  static const Color _border = AppColors.border;
   static const Color _primary = Color(0xFF4C8DFF);
   static const Color _danger = Color(0xFFFF5C5C);
   static const Color _success = Color(0xFF4ECB8D);
@@ -275,10 +254,9 @@ class _AccountDialogState extends State<_AccountDialog> {
           maxWidth: 650,
           maxHeight: MediaQuery.sizeOf(context).height * 0.9,
         ),
-        child: LiquidGlassPanel(
+        child: MattePanel(
           borderRadius: BorderRadius.circular(26),
           tint: _primary,
-          blurSigma: 30,
           child: Material(
             color: Colors.transparent,
             child: Column(
@@ -1946,11 +1924,11 @@ class _RankedEvent {
 }
 
 abstract final class _EventSearchColors {
-  static const background = Color(0x00090E18);
-  static const appBar = Color(0xA60D1A2B);
-  static const surface = Color(0x99172A40);
-  static const searchField = Color(0x7A243A55);
-  static const border = LiquidGlassColors.border;
+  static const background = AppColors.background;
+  static const appBar = AppColors.surface;
+  static const surface = AppColors.surface;
+  static const searchField = AppColors.surface;
+  static const border = AppColors.border;
   static const accent = Color(0xFF4F8CFF);
   static const accentLight = Color(0xFF82ADFF);
 }

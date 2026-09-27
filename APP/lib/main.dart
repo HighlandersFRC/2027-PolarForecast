@@ -5,7 +5,8 @@ import 'package:app/pages/team_page.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/FollowUps.dart';
 import 'package:app/widgets/PitScoutingTeamPage.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/RobotImageCapturePage.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:provider/provider.dart';
@@ -32,8 +33,8 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Polar Forecast',
-      theme: buildLiquidGlassTheme(),
-      builder: (context, child) => LiquidGlassBackground(
+      theme: buildMatteTheme(),
+      builder: (context, child) => MatteBackground(
         child: child ?? const SizedBox.shrink(),
       ),
       home: const HomePage(),
@@ -84,6 +85,22 @@ class MyApp extends StatelessWidget {
               settings: settings,
               builder: (_) =>
                   PitScoutingTeamPage(teamNumber: team, eventCode: eventCode));
+        }
+
+        if (uri.pathSegments.length == 5 &&
+            uri.pathSegments[0] == 'event' &&
+            uri.pathSegments[2] == 'team' &&
+            uri.pathSegments[4] == 'image') {
+          final eventCode = uri.pathSegments[1];
+          final team = int.parse(uri.pathSegments[3]);
+
+          return MaterialPageRoute(
+            settings: settings,
+            builder: (_) => RobotImageCapturePage(
+              teamNumber: team,
+              eventCode: eventCode,
+            ),
+          );
         }
 
         if (uri.pathSegments.length == 5 &&

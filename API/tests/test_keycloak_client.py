@@ -27,7 +27,11 @@ class KeycloakAdminClientTests(unittest.TestCase):
         )
 
         self.assertEqual(self._request(), "token")
-        self.assertNotIn("client_secret", post.call_args.kwargs["data"])
+        request_data = post.call_args.kwargs["data"]
+        self.assertEqual(request_data["grant_type"], "password")
+        self.assertEqual(request_data["username"], "admin")
+        self.assertEqual(request_data["password"], "admin")
+        self.assertNotIn("client_secret", request_data)
 
     @patch("keycloak_client.requests.post")
     def test_confidential_client_sends_its_secret(self, post):
@@ -47,6 +51,30 @@ class KeycloakAdminClientTests(unittest.TestCase):
             post.call_args.kwargs["data"]["client_secret"],
             "correct-secret",
         )
+        self.assertEqual(
+            post.call_args.kwargs["data"]["grant_type"],
+            "client_credentials",
+        )
+        self.assertNotIn("username", post.call_args.kwargs["data"])
+        self.assertNotIn("password", post.call_args.kwargs["data"])
+
+    def test_explicit_service_account_mode_requires_secret(self):
+        with self.assertRaisesRegex(
+            KeycloakAdminAuthError,
+            "KEYCLOAK_ADMIN_CLIENT_SECRET",
+        ):
+            self._request(
+                auth_mode="client_credentials",
+                client_id="polarforecast-api",
+                client_secret="",
+            )
+
+    def test_password_mode_requires_credentials(self):
+        with self.assertRaisesRegex(
+            KeycloakAdminAuthError,
+            "KEYCLOAK_ADMIN_USERNAME",
+        ):
+            self._request(auth_mode="password", username="", password="")
 
     @patch("keycloak_client.requests.post")
     def test_invalid_client_error_explains_the_relevant_settings(self, post):

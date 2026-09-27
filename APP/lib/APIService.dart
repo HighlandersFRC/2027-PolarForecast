@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:app/models/2026Matchscouting.dart';
 import 'package:app/models/2026Pitscouting.dart';
@@ -220,6 +221,178 @@ class APIService {
           ),
         )
         .toList();
+  }
+
+  Future<List<Map<String, String>>> fetchTeamImages(
+    int team, {
+    int year = 2026,
+  }) async {
+    final uri = Uri.parse('$baseUrl/teams/$team/media').replace(
+      queryParameters: {'year': year.toString()},
+    );
+    final response = await _client.get(
+      uri,
+      headers: {'Accept': 'application/json'},
+    );
+
+    if (response.statusCode != 200) return const [];
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['media'] is! List) return const [];
+
+    final images = <Map<String, String>>[];
+    for (final raw in decoded['media'] as List) {
+      if (raw is! Map) continue;
+      final item = Map<String, dynamic>.from(raw);
+      final direct = item['direct_url']?.toString().trim();
+      final view = item['view_url']?.toString().trim();
+      final imageUrl = direct != null && direct.isNotEmpty
+          ? direct
+          : view != null && view.isNotEmpty
+              ? view
+              : null;
+      if (imageUrl == null) continue;
+
+      images.add({
+        'url': imageUrl,
+        'view_url': view ?? imageUrl,
+        'type': item['type']?.toString().trim().isNotEmpty == true
+            ? item['type'].toString().trim()
+            : 'image',
+      });
+    }
+    return images;
+  }
+
+  Future<String?> fetchTeamImage(int team, {int year = 2026}) async {
+    final images = await fetchTeamImages(team, year: year);
+    return images.isEmpty ? null : images.first['url'];
+  }
+
+  Future<List<Map<String, String>>> fetchRobotImages({
+    required String groupId,
+    required String event,
+    required int team,
+    required String username,
+  }) async {
+    if (groupId.trim().isEmpty || username.trim().isEmpty) return const [];
+
+    final uri = Uri.parse(
+      '$baseUrl/robot-images/$groupId/events/$event/teams/$team',
+    ).replace(queryParameters: {'username': username});
+    final response = await _client.get(
+      uri,
+      headers: {'Accept': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load robot images: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['images'] is! List) return const [];
+
+    return (decoded['images'] as List)
+        .whereType<Map>()
+        .map((raw) {
+          final item = Map<String, dynamic>.from(raw);
+          final id = item['id']?.toString() ?? '';
+          final imageUri =
+              Uri.parse('$baseUrl/robot-images/$id/content').replace(
+            queryParameters: {
+              'group_id': groupId,
+              'username': username,
+            },
+          );
+          return <String, String>{
+            'id': id,
+            'url': imageUri.toString(),
+            'type': item['content_type']?.toString() ?? 'image/jpeg',
+            'source': item['capture_source']?.toString() ?? 'camera',
+            'scout': item['scout']?.toString() ?? '',
+            'created_at': item['created_at']?.toString() ?? '',
+          };
+        })
+        .where((item) => item['id']!.isNotEmpty)
+        .toList();
+  }
+
+  Future<String> submitRobotImage({
+    required String groupId,
+    required String event,
+    required int team,
+    required Map<String, dynamic> scoutInfo,
+    required Uint8List bytes,
+    required String contentType,
+    required String captureSource,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/robot-images'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'groupId': groupId,
+        'event': event,
+        'team': team,
+        'scoutInfo': scoutInfo,
+        'content_type': contentType,
+        'image_base64': base64Encode(bytes),
+        'capture_source': captureSource,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to upload robot image: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['image_id'] == null) {
+      throw const FormatException('Invalid robot image upload response.');
+    }
+    return decoded['image_id'].toString();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchPicklist({
+    required String groupId,
+    required String event,
+    required String username,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklist',
+    ).replace(queryParameters: {'username': username});
+    final response = await _client.get(
+      uri,
+      headers: {'Accept': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load picklist: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['teams'] is! List) return [];
+    return (decoded['teams'] as List)
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<void> savePicklist({
+    required String groupId,
+    required String event,
+    required String username,
+    required List<Map<String, dynamic>> teams,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklist',
+    );
+    final response = await _client.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'teams': teams}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to save picklist: ${response.body}');
+    }
   }
 
   Future<List<MatchPrediction>> fetchPredictionsByEvent(String eventKey) async {
@@ -460,57 +633,57 @@ class APIService {
     }
   }
 
-Future<List<FollowUpIncident>> fetchFollowUpIncidents({
-  required String groupId,
-  required String username,
-  required int team,
-  required String event,
-}) async {
-  final uri = Uri.parse(
-    '$baseUrl/followup/$groupId/group/$username/team/$team/event/$event',
-  );
+  Future<List<FollowUpIncident>> fetchFollowUpIncidents({
+    required String groupId,
+    required String username,
+    required int team,
+    required String event,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/followup/$groupId/group/$username/team/$team/event/$event',
+    );
 
-  final response = await http.get(uri);
+    final response = await http.get(uri);
 
-  if (response.statusCode != 200) {
-    throw Exception(response.body);
+    if (response.statusCode != 200) {
+      throw Exception(response.body);
+    }
+
+    final decoded = jsonDecode(response.body);
+
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Invalid follow-up response.');
+    }
+
+    final rawData = decoded['data'];
+
+    if (rawData is! List) {
+      return const <FollowUpIncident>[];
+    }
+
+    return rawData
+        .whereType<Map>()
+        .map(
+          (item) => FollowUpIncident.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .toList();
   }
 
-  final decoded = jsonDecode(response.body);
+  Future<void> submitFollowUps(FollowUp followUp) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/followup'),
+      headers: const {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(followUp.toJson()),
+    );
 
-  if (decoded is! Map<String, dynamic>) {
-    throw const FormatException('Invalid follow-up response.');
+    if (response.statusCode != 200) {
+      throw Exception(response.body);
+    }
   }
-
-  final rawData = decoded['data'];
-
-  if (rawData is! List) {
-    return const <FollowUpIncident>[];
-  }
-
-  return rawData
-      .whereType<Map>()
-      .map(
-        (item) => FollowUpIncident.fromJson(
-          Map<String, dynamic>.from(item),
-        ),
-      )
-      .toList();
-}
-
-Future<void> submitFollowUps(FollowUp followUp) async {
-  final response = await http.post(
-    Uri.parse('$baseUrl/followup'),
-    headers: const {
-      'Content-Type': 'application/json',
-    },
-    body: jsonEncode(followUp.toJson()),
-  );
-
-  if (response.statusCode != 200) {
-    throw Exception(response.body);
-  }
-}
 
   Future<void> submitPitScouting(
     PitScouting2026 pitData,

@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:app/APIService.dart';
 import 'package:app/models/follow_up.dart';
@@ -7,7 +6,8 @@ import 'package:app/models/team_stat.dart';
 import 'package:app/models/team_stats.dart';
 import 'package:app/services/live_data_controller.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/DataSourceBanner.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
@@ -29,32 +29,26 @@ class TeamPage extends StatefulWidget {
   State<TeamPage> createState() => _TeamPageState();
 }
 
-class _TeamGlassCard extends StatelessWidget {
+class _TeamCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color tint;
   final double radius;
-  final double blurSigma;
-  final bool shadow;
 
-  const _TeamGlassCard({
+  const _TeamCard({
     required this.child,
     this.padding = EdgeInsets.zero,
-    this.tint = LiquidGlassColors.primary,
+    this.tint = AppColors.primary,
     this.radius = 20,
-    this.blurSigma = 18,
-    this.shadow = true,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: LiquidGlassPanel(
+      child: MattePanel(
         padding: padding,
         tint: tint,
-        blurSigma: blurSigma,
-        shadow: shadow,
         borderRadius: BorderRadius.circular(radius),
         child: child,
       ),
@@ -62,14 +56,14 @@ class _TeamGlassCard extends StatelessWidget {
   }
 }
 
-class _TeamGlassInset extends StatelessWidget {
+class _TeamInset extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color tint;
   final double radius;
   final bool expand;
 
-  const _TeamGlassInset({
+  const _TeamInset({
     required this.child,
     this.padding = const EdgeInsets.all(12),
     this.tint = Colors.white,
@@ -83,18 +77,10 @@ class _TeamGlassInset extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: 0.09),
-            tint.withValues(alpha: 0.055),
-            Colors.white.withValues(alpha: 0.025),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         border: Border.all(
           color: tint == Colors.white
-              ? LiquidGlassColors.border
+              ? AppColors.border
               : tint.withValues(alpha: 0.24),
         ),
       ),
@@ -111,14 +97,15 @@ class _TeamPageState extends State<TeamPage> {
   late Future<List<dynamic>> _futureScouting;
   late Future<List<dynamic>> _futurePitScouting;
   late Future<List<FollowUpIncident>> _futureFollowUps;
+  late Future<List<Map<String, String>>> _futureTeamImages;
 
   int _index = 0;
 
   // Dark theme colors (consistent palette)
   static const Color bg = Colors.transparent;
-  static const Color card = LiquidGlassColors.glass;
-  static const Color accent = LiquidGlassColors.primary;
-  static const Color text = LiquidGlassColors.text;
+  static const Color card = AppColors.surface;
+  static const Color accent = AppColors.primary;
+  static const Color text = AppColors.text;
 
   @override
   void initState() {
@@ -131,10 +118,22 @@ class _TeamPageState extends State<TeamPage> {
         username: widget.username,
       ),
     );
+    _futureTeamImages = _apiService.fetchRobotImages(
+      groupId: widget.groupId,
+      event: widget.eventCode,
+      team: widget.team,
+      username: widget.username,
+    );
     _loadScouting();
   }
 
   void _loadScouting() {
+    if (widget.groupId.trim().isEmpty || widget.username.trim().isEmpty) {
+      _futureScouting = Future.value(const <dynamic>[]);
+      _futurePitScouting = Future.value(const <dynamic>[]);
+      _futureFollowUps = Future.value(const <FollowUpIncident>[]);
+      return;
+    }
     _futureScouting = _apiService.getMatchScoutingByGroupTeamEvent(
       groupId: widget.groupId,
       username: widget.username,
@@ -164,6 +163,12 @@ class _TeamPageState extends State<TeamPage> {
         oldWidget.username != widget.username ||
         oldWidget.groupId != widget.groupId) {
       _stats.refresh(replace: true);
+      _futureTeamImages = _apiService.fetchRobotImages(
+        groupId: widget.groupId,
+        event: widget.eventCode,
+        team: widget.team,
+        username: widget.username,
+      );
       _loadScouting();
     }
   }
@@ -187,47 +192,56 @@ class _TeamPageState extends State<TeamPage> {
               child: const Icon(Icons.refresh),
             )
           : null,
-      body: BackdropGroup(
-        child: IndexedStack(
-          index: _index,
-          children: [
-            _buildStatsTab(),
-            _buildScoutingTab(),
-            _buildPitScoutingTab(),
-            _buildFollowUpTab(),
-          ],
-        ),
+      body: Column(
+        children: [
+          const DataSourceBanner(),
+          Expanded(
+            child: BackdropGroup(
+              child: IndexedStack(
+                index: _index,
+                children: [
+                  _buildStatsTab(),
+                  _buildScoutingTab(),
+                  _buildPitScoutingTab(),
+                  _buildImagesTab(),
+                  _buildFollowUpTab(),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: ClipRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: BottomNavigationBar(
-            currentIndex: _index,
-            onTap: (i) => setState(() => _index = i),
-            backgroundColor: LiquidGlassColors.glassStrong,
-            selectedItemColor: accent,
-            unselectedItemColor: LiquidGlassColors.textMuted,
-            type: BottomNavigationBarType.fixed,
-            elevation: 0,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.bar_chart),
-                label: "Stats",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.remove_red_eye),
-                label: "Match Scouting",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.list),
-                label: "Pit Scouting",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.heart_broken_rounded),
-                label: "Follow-Ups",
-              ),
-            ],
-          ),
+        child: BottomNavigationBar(
+          currentIndex: _index,
+          onTap: (i) => setState(() => _index = i),
+          backgroundColor: AppColors.surfaceRaised,
+          selectedItemColor: accent,
+          unselectedItemColor: AppColors.textMuted,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.bar_chart),
+              label: "Stats",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.remove_red_eye),
+              label: "Match Scouting",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.list),
+              label: "Pit Scouting",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.photo_library_outlined),
+              label: "Images",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.heart_broken_rounded),
+              label: "Follow-Ups",
+            ),
+          ],
         ),
       ),
     );
@@ -419,9 +433,8 @@ class _TeamPageState extends State<TeamPage> {
       future: _futurePitScouting,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _TeamGlassCard(
+          return const _TeamCard(
             padding: const EdgeInsets.all(18),
-            shadow: false,
             child: const Row(
               children: [
                 SizedBox(
@@ -488,7 +501,7 @@ class _TeamPageState extends State<TeamPage> {
           accessColor = Colors.white54;
         }
 
-        return _TeamGlassCard(
+        return _TeamCard(
           padding: const EdgeInsets.all(18),
           tint: accessColor,
           radius: 18,
@@ -540,7 +553,7 @@ class _TeamPageState extends State<TeamPage> {
                 ],
               );
 
-              final access = _TeamGlassInset(
+              final access = _TeamInset(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 10,
@@ -623,7 +636,7 @@ class _TeamPageState extends State<TeamPage> {
             ? Icons.trending_down_rounded
             : Icons.trending_flat_rounded;
 
-    return _TeamGlassCard(
+    return _TeamCard(
       padding: const EdgeInsets.all(20),
       tint: const Color(0xFF69A7FF),
       child: LayoutBuilder(
@@ -672,7 +685,16 @@ class _TeamPageState extends State<TeamPage> {
             ],
           );
 
-          final oprInfo = _TeamGlassInset(
+          final teamIdentity = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildTeamPhoto(teamNumber),
+              const SizedBox(width: 16),
+              Expanded(child: teamInfo),
+            ],
+          );
+
+          final oprInfo = _TeamInset(
             padding: const EdgeInsets.symmetric(
               horizontal: 16,
               vertical: 14,
@@ -730,7 +752,7 @@ class _TeamPageState extends State<TeamPage> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                teamInfo,
+                teamIdentity,
                 const SizedBox(height: 16),
                 oprInfo,
               ],
@@ -739,12 +761,335 @@ class _TeamPageState extends State<TeamPage> {
 
           return Row(
             children: [
-              Expanded(child: teamInfo),
+              Expanded(child: teamIdentity),
               const SizedBox(width: 20),
               oprInfo,
             ],
           );
         },
+      ),
+    );
+  }
+
+  int get _eventYear {
+    if (widget.eventCode.length < 4) return 2026;
+    return int.tryParse(widget.eventCode.substring(0, 4)) ?? 2026;
+  }
+
+  Widget _buildTeamPhoto(int teamNumber) {
+    return FutureBuilder<List<Map<String, String>>>(
+      future: _futureTeamImages,
+      builder: (context, snapshot) {
+        final images = snapshot.data ?? const <Map<String, String>>[];
+        final imageUrl = images.isEmpty ? null : images.first['url'];
+        return Container(
+          width: 92,
+          height: 92,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceSoft,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: imageUrl == null
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.smart_toy_outlined,
+                        color: Colors.white38, size: 31),
+                    const SizedBox(height: 5),
+                    Text(
+                      '$teamNumber',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                )
+              : Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.white38, size: 30),
+                  ),
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _buildImagesTab() {
+    return FutureBuilder<List<Map<String, String>>>(
+      future: _futureTeamImages,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return _buildImageGalleryMessage(
+            icon: Icons.cloud_off_rounded,
+            title: 'Could not load robot images',
+            message: snapshot.error.toString(),
+          );
+        }
+
+        final images = snapshot.data ?? const <Map<String, String>>[];
+        if (images.isEmpty) {
+          return _buildImageGalleryMessage(
+            icon: Icons.no_photography_outlined,
+            title: 'No robot images found',
+            message:
+                'No pit scout has added a robot photo for Team ${widget.team} at this event yet.',
+          );
+        }
+
+        return CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+              sliver: SliverToBoxAdapter(
+                child: _TeamCard(
+                  padding: const EdgeInsets.all(18),
+                  tint: const Color(0xFFB388FF),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB388FF).withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: const Icon(
+                          Icons.photo_library_rounded,
+                          color: Color(0xFFC8A7FF),
+                        ),
+                      ),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Team ${widget.team} Images',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '${images.length} scout-collected ${images.length == 1 ? 'photo' : 'photos'}',
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+              sliver: SliverLayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.crossAxisExtent;
+                  final columns = width >= 1000
+                      ? 4
+                      : width >= 680
+                          ? 3
+                          : width >= 390
+                              ? 2
+                              : 1;
+
+                  return SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 1.15,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _buildImageTile(images[index], index),
+                      childCount: images.length,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildImageGalleryMessage({
+    required IconData icon,
+    required String title,
+    required String message,
+  }) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white30, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageTile(Map<String, String> media, int index) {
+    final imageUrl = media['url'] ?? '';
+    final source =
+        media['source'] == 'camera' ? 'Camera photo' : 'Uploaded photo';
+    final scout = media['scout'] ?? '';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(17),
+        onTap: () => _showTeamImage(imageUrl, index + 1),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: AppColors.surfaceSoft,
+            borderRadius: BorderRadius.circular(17),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white30,
+                      size: 38,
+                    ),
+                  ),
+                ),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.center,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Color(0xCC090A0D)],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 9,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          scout.isEmpty ? source : '$source • $scout',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.zoom_in_rounded,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showTeamImage(String imageUrl, int imageNumber) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF090A0D),
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer(
+                  minScale: 0.7,
+                  maxScale: 5,
+                  child: Center(
+                    child: Image.network(
+                      imageUrl,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white38,
+                        size: 52,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 10,
+                left: 10,
+                child: IconButton.filledTonal(
+                  tooltip: 'Close image',
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ),
+              Positioned(
+                top: 16,
+                right: 18,
+                child: Text(
+                  'Team ${widget.team} • Image $imageNumber',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -794,7 +1139,7 @@ class _TeamPageState extends State<TeamPage> {
     required IconData icon,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(14),
       tint: color,
       radius: 15,
@@ -845,7 +1190,7 @@ class _TeamPageState extends State<TeamPage> {
     const graphColor = Color(0xFF69A7FF);
 
     if (history.isEmpty) {
-      return const _TeamGlassCard(
+      return const _TeamCard(
         padding: const EdgeInsets.all(24),
         tint: graphColor,
         radius: 18,
@@ -921,7 +1266,7 @@ class _TeamPageState extends State<TeamPage> {
       (a, b) => a.OPR > b.OPR ? a : b,
     );
 
-    return _TeamGlassCard(
+    return _TeamCard(
       padding: const EdgeInsets.all(18),
       tint: graphColor,
       radius: 18,
@@ -1104,7 +1449,7 @@ class _TeamPageState extends State<TeamPage> {
     required String match,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 11,
@@ -1151,7 +1496,7 @@ class _TeamPageState extends State<TeamPage> {
   Widget _buildMatchHistoryList(
     List<TeamMatchHistory> history,
   ) {
-    return _TeamGlassCard(
+    return _TeamCard(
       tint: const Color(0xFF69A7FF),
       radius: 18,
       child: Column(
@@ -1638,7 +1983,7 @@ class _TeamPageState extends State<TeamPage> {
       (scoutingEntries.length / 7).ceil(),
     );
 
-    return _TeamGlassCard(
+    return _TeamCard(
       tint: teleopColor,
       radius: 18,
       child: Padding(
@@ -1902,10 +2247,9 @@ class _TeamPageState extends State<TeamPage> {
     final comments = misc['comments']?.toString().trim() ?? '';
     final scoutName = scoutInfo['firstName']?.toString().trim() ?? 'Unknown';
 
-    return _TeamGlassCard(
+    return _TeamCard(
       tint: autoColor,
       radius: 16,
-      blurSigma: 14,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -2012,7 +2356,7 @@ class _TeamPageState extends State<TeamPage> {
             ),
             if (comments.isNotEmpty) ...[
               const SizedBox(height: 14),
-              _TeamGlassInset(
+              _TeamInset(
                 padding: const EdgeInsets.all(12),
                 radius: 12,
                 child: Column(
@@ -2093,7 +2437,7 @@ class _TeamPageState extends State<TeamPage> {
     required IconData icon,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(12),
       tint: color,
       radius: 12,
@@ -2148,7 +2492,7 @@ class _TeamPageState extends State<TeamPage> {
     required Color accent,
     required bool compact,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 8 : 12,
         vertical: 11,
@@ -2202,7 +2546,7 @@ class _TeamPageState extends State<TeamPage> {
     required String label,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 7,
@@ -2239,7 +2583,7 @@ class _TeamPageState extends State<TeamPage> {
     required String label,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 7,
@@ -2561,7 +2905,7 @@ class _TeamPageState extends State<TeamPage> {
     final statusColor =
         hasPending ? const Color(0xFFF87171) : const Color(0xFF4ADE80);
 
-    return _TeamGlassCard(
+    return _TeamCard(
       padding: const EdgeInsets.all(18),
       tint: statusColor,
       radius: 18,
@@ -2660,7 +3004,7 @@ class _TeamPageState extends State<TeamPage> {
     required String value,
     required Color color,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 12,
@@ -2700,10 +3044,9 @@ class _TeamPageState extends State<TeamPage> {
     final statusColor =
         resolved ? const Color(0xFF4ADE80) : const Color(0xFFF87171);
 
-    return _TeamGlassCard(
+    return _TeamCard(
       tint: statusColor,
       radius: 17,
-      blurSigma: 14,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -2843,7 +3186,7 @@ class _TeamPageState extends State<TeamPage> {
   }) {
     final color = resolved ? const Color(0xFF4ADE80) : const Color(0xFFF87171);
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 9,
         vertical: 6,
@@ -2878,7 +3221,7 @@ class _TeamPageState extends State<TeamPage> {
     final comments = report.comments.trim();
     final timestamp = _formatFollowUpTimestamp(report.submittedAt);
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(12),
       tint: const Color(0xFFF87171),
       radius: 12,
@@ -2920,7 +3263,7 @@ class _TeamPageState extends State<TeamPage> {
   }
 
   Widget _buildDeathReportEmptyState() {
-    return const _TeamGlassInset(
+    return const _TeamInset(
       padding: const EdgeInsets.all(12),
       radius: 12,
       child: const Text(
@@ -2940,7 +3283,7 @@ class _TeamPageState extends State<TeamPage> {
     final comments = resolution.comments.trim();
     final timestamp = _formatFollowUpTimestamp(resolution.submittedAt);
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(13),
       tint: const Color(0xFF4ADE80),
       radius: 12,
@@ -3023,7 +3366,7 @@ class _TeamPageState extends State<TeamPage> {
   }
 
   Widget _buildPendingResolutionCard() {
-    return const _TeamGlassInset(
+    return const _TeamInset(
       padding: const EdgeInsets.all(13),
       tint: Color(0xFFFACC15),
       radius: 12,
@@ -3212,7 +3555,7 @@ class _TeamPageState extends State<TeamPage> {
           child: Column(
             children: [
               // Header
-              _TeamGlassCard(
+              _TeamCard(
                 padding: const EdgeInsets.all(16),
                 tint: Colors.blueAccent,
                 radius: 16,
@@ -3328,7 +3671,7 @@ class _TeamPageState extends State<TeamPage> {
                     "${autoPaths.length} ${autoPaths.length == 1 ? 'path' : 'paths'} recorded",
                 children: [
                   if (autoPaths.isEmpty)
-                    const _TeamGlassInset(
+                    const _TeamInset(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
                         vertical: 18,
@@ -3377,7 +3720,7 @@ class _TeamPageState extends State<TeamPage> {
                               bottom:
                                   pathIndex == autoPaths.length - 1 ? 0 : 14,
                             ),
-                            child: _TeamGlassInset(
+                            child: _TeamInset(
                               padding: const EdgeInsets.all(14),
                               tint: Colors.blueAccent,
                               expand: true,
@@ -3439,7 +3782,7 @@ class _TeamPageState extends State<TeamPage> {
                                   ),
                                   const SizedBox(height: 14),
                                   if (actions.isEmpty)
-                                    const _TeamGlassInset(
+                                    const _TeamInset(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 12,
                                         vertical: 14,
@@ -3473,7 +3816,7 @@ class _TeamPageState extends State<TeamPage> {
                                               constraints: const BoxConstraints(
                                                 minHeight: 56,
                                               ),
-                                              child: _TeamGlassInset(
+                                              child: _TeamInset(
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                   horizontal: 11,
@@ -3627,12 +3970,10 @@ class _TeamPageState extends State<TeamPage> {
     String? subtitle,
     required List<Widget> children,
   }) {
-    return _TeamGlassCard(
+    return _TeamCard(
       padding: const EdgeInsets.all(14),
       tint: Colors.blueAccent,
       radius: 16,
-      blurSigma: 14,
-      shadow: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3694,7 +4035,7 @@ class _TeamPageState extends State<TeamPage> {
   }) {
     final tileColor = value ? Colors.greenAccent : Colors.white;
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.symmetric(
         horizontal: 12,
         vertical: 13,
@@ -3736,7 +4077,7 @@ class _TeamPageState extends State<TeamPage> {
     required String label,
     required String value,
   }) {
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(12),
       expand: true,
       radius: 12,
@@ -3783,7 +4124,7 @@ class _TeamPageState extends State<TeamPage> {
   }) {
     final bool hasValue = value.trim().isNotEmpty && value != "Not provided";
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(13),
       expand: true,
       radius: 12,
@@ -3934,9 +4275,40 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
   }
 
   List<_AutoWaypoint> get _movementWaypoints {
-    return _allWaypoints
-        .where((waypoint) => waypoint.countsForMovement)
-        .toList();
+    final recorded =
+        _allWaypoints.where((waypoint) => waypoint.countsForMovement).toList();
+    final routed = <_AutoWaypoint>[];
+
+    for (final waypoint in recorded) {
+      if (routed.isNotEmpty) {
+        final previous = routed.last.normalizedPosition;
+        final next = waypoint.normalizedPosition;
+        final crossesBarrierWithoutGate =
+            (previous.dx < 0.46 && next.dx > 0.56) ||
+                (previous.dx > 0.56 && next.dx < 0.46);
+
+        if (crossesBarrierWithoutGate) {
+          // Legacy routines did not record a trench/bump crossing. Route their
+          // replay through the nearest trench instead of drawing the robot
+          // straight through a bump. New routines always record this waypoint.
+          final useLeftTrench = (previous.dy + next.dy) / 2 <= 0.5;
+          routed.add(
+            _AutoWaypoint(
+              action: 'Estimated trench route',
+              stepNumber: waypoint.stepNumber,
+              normalizedPosition: Offset(
+                0.5,
+                useLeftTrench ? 0.08 : 0.98,
+              ),
+              countsForMovement: true,
+            ),
+          );
+        }
+      }
+      routed.add(waypoint);
+    }
+
+    return routed;
   }
 
   List<_AutoReplayStep> get _replaySteps {
@@ -3948,6 +4320,27 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
         if (robotPosition == null) {
           robotPosition = waypoint.normalizedPosition;
           continue;
+        }
+
+        final crossesBarrierWithoutGate = (robotPosition.dx < 0.46 &&
+                waypoint.normalizedPosition.dx > 0.56) ||
+            (robotPosition.dx > 0.56 && waypoint.normalizedPosition.dx < 0.46);
+        if (crossesBarrierWithoutGate) {
+          final useLeftTrench =
+              (robotPosition.dy + waypoint.normalizedPosition.dy) / 2 <= 0.5;
+          final gate = Offset(0.5, useLeftTrench ? 0.08 : 0.98);
+          final gateDifference = gate - robotPosition;
+          steps.add(
+            _AutoReplayStep(
+              type: _AutoReplayStepType.movement,
+              robotStart: robotPosition,
+              robotEnd: gate,
+              target: null,
+              heading: math.atan2(gateDifference.dy, gateDifference.dx),
+              durationMilliseconds: 700,
+            ),
+          );
+          robotPosition = gate;
         }
 
         final difference = waypoint.normalizedPosition - robotPosition;
@@ -4166,9 +4559,12 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
   Widget build(BuildContext context) {
     final waypoints = _allWaypoints;
     final movementWaypoints = _movementWaypoints;
-    final unknownActionCount = widget.path.length - waypoints.length;
+    final unknownActionCount = widget.path.where((action) {
+      return _AutoPathCoordinates.positionFor(action) == null &&
+          !_AutoPathCoordinates.isMarkerOnlyAction(action);
+    }).length;
 
-    return _TeamGlassInset(
+    return _TeamInset(
       padding: const EdgeInsets.all(13),
       tint: const Color(0xFF67A4FF),
       expand: true,
@@ -4247,7 +4643,7 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
           ),
           const SizedBox(height: 12),
           if (widget.path.isEmpty)
-            const _TeamGlassInset(
+            const _TeamInset(
               padding: const EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 18,
@@ -4636,16 +5032,19 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
                 },
               ),
             if (waypoints.isEmpty)
-              const _TeamGlassInset(
+              _TeamInset(
                 padding: const EdgeInsets.all(13),
-                tint: Colors.orangeAccent,
+                tint: unknownActionCount == 0
+                    ? const Color(0xFFFFD27A)
+                    : Colors.orangeAccent,
                 expand: true,
                 radius: 12,
-                child: const Text(
-                  'The actions were saved, but none match a known field '
-                  'coordinate. They are still listed below.',
-                  style: TextStyle(
-                    color: Colors.orangeAccent,
+                child: Text(
+                  unknownActionCount == 0
+                      ? 'Only preload information was recorded, so there is no robot route to animate.'
+                      : 'The actions were saved, but none match a known field coordinate. They are still listed below.',
+                  style: const TextStyle(
+                    color: Color(0xFFFFD27A),
                     fontSize: 12,
                     height: 1.4,
                   ),
@@ -4671,12 +5070,13 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
                   _AutoPathCoordinates.positionFor(action) != null;
               final isMarkerOnly =
                   _AutoPathCoordinates.isMarkerOnlyAction(action);
+              final isPreload = _AutoPathCoordinates.isPreloadAction(action);
 
               return Padding(
                 padding: EdgeInsets.only(
                   bottom: index == widget.path.length - 1 ? 0 : 7,
                 ),
-                child: _TeamGlassInset(
+                child: _TeamInset(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 9,
@@ -4719,11 +5119,13 @@ class _AutoPathReplayState extends State<_AutoPathReplay>
                               ),
                             ),
                             if (isMarkerOnly)
-                              const Padding(
-                                padding: EdgeInsets.only(top: 2),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
                                 child: Text(
-                                  'Shoots Game Piece',
-                                  style: TextStyle(
+                                  isPreload
+                                      ? 'Preload location - not a starting coordinate'
+                                      : 'Shoots game piece',
+                                  style: const TextStyle(
                                     color: Color(0xFFFFD27A),
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
@@ -4860,6 +5262,13 @@ class _AutoWaypoint {
 
 class _AutoPathCoordinates {
   static final Set<String> _markerOnlyActions = {
+    'preload left',
+    'preload center',
+    'preload right',
+    // Legacy names represented preload selection, not field coordinates.
+    'start left',
+    'start center',
+    'start right',
     'shot at hub',
     'hub',
   };
@@ -4887,6 +5296,11 @@ class _AutoPathCoordinates {
 
   static bool isMarkerOnlyAction(String action) {
     return _markerOnlyActions.contains(_normalize(action));
+  }
+
+  static bool isPreloadAction(String action) {
+    final normalized = _normalize(action);
+    return normalized.startsWith('preload ') || normalized.startsWith('start ');
   }
 
   static bool countsForMovement(String action) {

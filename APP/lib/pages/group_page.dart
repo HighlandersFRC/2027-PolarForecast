@@ -2,7 +2,7 @@ import 'package:app/APIService.dart';
 import 'package:app/models/group_events.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -213,11 +213,10 @@ class _GroupHero extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: SizedBox(
         width: double.infinity,
-        child: LiquidGlassPanel(
+        child: MattePanel(
           padding: const EdgeInsets.all(22),
           borderRadius: BorderRadius.circular(24),
-          tint: LiquidGlassColors.secondary,
-          blurSigma: 24,
+          tint: AppColors.secondary,
           child: Wrap(
             spacing: 18,
             runSpacing: 16,
@@ -311,23 +310,19 @@ class _DesktopNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 250,
-      child: LiquidGlassPanel(
+      child: MattePanel(
         padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
         borderRadius: const BorderRadius.only(
           topRight: Radius.circular(28),
           bottomRight: Radius.circular(28),
         ),
-        tint: LiquidGlassColors.secondary,
-        blurSigma: 26,
-        shadow: false,
+        tint: AppColors.secondary,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            LiquidGlassPanel(
+            MattePanel(
               padding: const EdgeInsets.all(15),
               borderRadius: BorderRadius.circular(18),
-              blurSigma: 14,
-              shadow: false,
               child: Row(
                 children: [
                   const CircleAvatar(
@@ -456,11 +451,9 @@ class _MobileNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      blurSigma: 24,
-      tint: LiquidGlassColors.secondary,
-      shadow: false,
+      tint: AppColors.secondary,
       child: NavigationBarTheme(
         data: NavigationBarThemeData(
           height: 70,
@@ -917,10 +910,9 @@ class _EventSearchDialogState extends State<_EventSearchDialog> {
           maxWidth: 720,
           maxHeight: screenSize.height * 0.82,
         ),
-        child: LiquidGlassPanel(
+        child: MattePanel(
           borderRadius: BorderRadius.circular(26),
-          tint: LiquidGlassColors.secondary,
-          blurSigma: 28,
+          tint: AppColors.secondary,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(26),
             child: Column(
@@ -1198,10 +1190,8 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       borderRadius: BorderRadius.circular(20),
-      blurSigma: 18,
-      shadow: false,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -1689,12 +1679,10 @@ class _JoinCodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasCode = code != null && code!.isNotEmpty;
 
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(18),
       borderRadius: BorderRadius.circular(20),
-      tint: LiquidGlassColors.secondary,
-      blurSigma: 18,
-      shadow: false,
+      tint: AppColors.secondary,
       child: Row(
         children: [
           Container(
@@ -1791,11 +1779,9 @@ class _RoleSection extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: LiquidGlassPanel(
+      child: MattePanel(
         borderRadius: BorderRadius.circular(20),
         tint: _roleColor(role),
-        blurSigma: 18,
-        shadow: false,
         child: ExpansionTile(
           initiallyExpanded: true,
           collapsedIconColor: _PolarColors.mutedText,
@@ -2136,11 +2122,9 @@ class _CountPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       borderRadius: BorderRadius.circular(999),
-      blurSigma: 12,
-      shadow: false,
       child: Text(
         '$count ${count == 1 ? singular : plural}',
         style: const TextStyle(
@@ -2243,11 +2227,10 @@ class _CenteredPanel extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
-          child: LiquidGlassPanel(
+          child: MattePanel(
             padding: const EdgeInsets.all(28),
             borderRadius: BorderRadius.circular(24),
-            tint: LiquidGlassColors.secondary,
-            blurSigma: 24,
+            tint: AppColors.secondary,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2520,17 +2503,17 @@ void _showSnackBar(
 }
 
 class _PolarColors {
-  static const surface = LiquidGlassColors.glass;
-  static const surfaceRaised = LiquidGlassColors.glassStrong;
-  static const border = LiquidGlassColors.border;
-  static const primary = LiquidGlassColors.primary;
+  static const surface = AppColors.surface;
+  static const surfaceRaised = AppColors.surfaceRaised;
+  static const border = AppColors.border;
+  static const primary = AppColors.primary;
   static const primarySoft = Color(0x4D69B8FF);
-  static const purple = LiquidGlassColors.secondary;
+  static const purple = AppColors.secondary;
   static const purpleSoft = Color(0x4D9B83FF);
   static const gold = Color(0xFFFFC75C);
   static const success = Color(0xFF62D7A5);
   static const danger = Color(0xFFFF6B7A);
   static const dangerDark = Color(0xFF7A2E39);
-  static const mutedText = LiquidGlassColors.textMuted;
+  static const mutedText = AppColors.textMuted;
   static const subtleText = Color(0xFF718096);
 }

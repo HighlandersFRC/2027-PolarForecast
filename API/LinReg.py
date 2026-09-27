@@ -21,6 +21,8 @@ TBA_FUEL_WEIGHT = 1.0 - SCOUTING_FUEL_WEIGHT
 
 SCOUTED_AUTO_FUEL_POINT_VALUE = 1.0
 SCOUTED_TELEOP_FUEL_POINT_VALUE = 1.0
+MAX_SCOUTED_AUTO_FUEL = 300.0
+MAX_SCOUTED_TELEOP_FUEL = 1000.0
 
 
 AUTO_FUEL_PATHS = (("hubScore", "autoPoints"),)
@@ -59,6 +61,18 @@ def _safe_float(value: Any) -> Optional[float]:
             return None
 
     return None
+
+
+def _safe_scouted_fuel(
+    value: Any,
+    *,
+    maximum: float,
+) -> Optional[float]:
+    """Parse plausible scouting fuel while quarantining legacy outliers."""
+    number = _safe_float(value)
+    if number is None or number < 0 or number > maximum:
+        return None
+    return number
 
 
 def _safe_int(value: Any) -> Optional[int]:
@@ -667,11 +681,13 @@ def analyze_scout_data(
             else {}
         )
 
-        auto_fuel = _safe_float(
-            auto_data.get("fuel_scored")
+        auto_fuel = _safe_scouted_fuel(
+            auto_data.get("fuel_scored"),
+            maximum=MAX_SCOUTED_AUTO_FUEL,
         )
-        teleop_fuel = _safe_float(
-            teleop_data.get("fuel_scored")
+        teleop_fuel = _safe_scouted_fuel(
+            teleop_data.get("fuel_scored"),
+            maximum=MAX_SCOUTED_TELEOP_FUEL,
         )
         died = _safe_bool(misc_data.get("died"))
         defense = _safe_bool(misc_data.get("defense"))

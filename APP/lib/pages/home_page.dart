@@ -1,12 +1,13 @@
+import 'package:app/APIService.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
-  static const Color _primary = LiquidGlassColors.primary;
-  static const Color _secondary = LiquidGlassColors.secondary;
+  static const Color _primary = AppColors.primary;
+  static const Color _secondary = AppColors.secondary;
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +49,8 @@ class HomePage extends StatelessWidget {
                       );
                     },
                   ),
+                  const SizedBox(height: 34),
+                  const _TeamLookupCard(),
                   const SizedBox(height: 60),
                   const _SectionHeader(
                     eyebrow: 'BUILT FOR COMPETITION',
@@ -64,6 +67,204 @@ class HomePage extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _TeamLookupCard extends StatefulWidget {
+  const _TeamLookupCard();
+
+  @override
+  State<_TeamLookupCard> createState() => _TeamLookupCardState();
+}
+
+class _TeamLookupCardState extends State<_TeamLookupCard> {
+  final APIService _api = APIService();
+  final TextEditingController _teamController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final Future<List<EventSearchKey>> _events = _api.fetchEventKeys();
+  TextEditingController? _eventController;
+  EventSearchKey? _selectedEvent;
+
+  @override
+  void dispose() {
+    _teamController.dispose();
+    _api.dispose();
+    super.dispose();
+  }
+
+  void _openTeam(List<EventSearchKey> events) {
+    if (!_formKey.currentState!.validate()) return;
+    final rawEvent = _eventController?.text.trim() ?? '';
+    final event = _selectedEvent ??
+        events.cast<EventSearchKey?>().firstWhere(
+              (item) =>
+                  item!.key.toLowerCase() == rawEvent.toLowerCase() ||
+                  item.eventCode.toLowerCase() == rawEvent.toLowerCase() ||
+                  item.display.toLowerCase() == rawEvent.toLowerCase(),
+              orElse: () => null,
+            );
+    if (event == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose a valid event first.')),
+      );
+      return;
+    }
+
+    final team = int.parse(_teamController.text.trim());
+    Navigator.of(context).pushNamed('/event/${event.key}/$team/team');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MattePanel(
+      tint: HomePage._primary,
+      borderRadius: BorderRadius.circular(22),
+      padding: const EdgeInsets.all(20),
+      child: FutureBuilder<List<EventSearchKey>>(
+        future: _events,
+        builder: (context, snapshot) {
+          final events = snapshot.data ?? const <EventSearchKey>[];
+          return Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.manage_search_rounded,
+                        color: HomePage._primary, size: 28),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Look up any team',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Open stats, match scouting, pit scouting, autos, and a robot photo in one place.',
+                            style:
+                                TextStyle(color: Colors.white60, height: 1.35),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fields = <Widget>[
+                      Autocomplete<EventSearchKey>(
+                        displayStringForOption: (event) => event.display,
+                        optionsBuilder: (value) {
+                          final query = value.text.trim().toLowerCase();
+                          if (query.isEmpty) return events.take(12);
+                          return events.where((event) {
+                            return event.key.toLowerCase().contains(query) ||
+                                event.display.toLowerCase().contains(query);
+                          }).take(12);
+                        },
+                        onSelected: (event) {
+                          _selectedEvent = event;
+                          _eventController?.text = event.key;
+                        },
+                        fieldViewBuilder: (
+                          context,
+                          controller,
+                          focusNode,
+                          onSubmitted,
+                        ) {
+                          _eventController = controller;
+                          return TextFormField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            enabled: !snapshot.hasError,
+                            decoration: InputDecoration(
+                              labelText: snapshot.connectionState ==
+                                      ConnectionState.waiting
+                                  ? 'Loading events…'
+                                  : 'Event',
+                              prefixIcon: const Icon(Icons.event_rounded),
+                            ),
+                            onChanged: (_) => _selectedEvent = null,
+                            validator: (value) =>
+                                value == null || value.trim().isEmpty
+                                    ? 'Enter an event'
+                                    : null,
+                            onFieldSubmitted: (_) => _openTeam(events),
+                          );
+                        },
+                      ),
+                      TextFormField(
+                        controller: _teamController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Team number',
+                          prefixIcon: Icon(Icons.tag_rounded),
+                        ),
+                        validator: (value) {
+                          final team = int.tryParse(value?.trim() ?? '');
+                          return team == null || team <= 0
+                              ? 'Enter a valid team'
+                              : null;
+                        },
+                        onFieldSubmitted: (_) => _openTeam(events),
+                      ),
+                      FilledButton.icon(
+                        onPressed:
+                            events.isEmpty ? null : () => _openTeam(events),
+                        icon: const Icon(Icons.arrow_forward_rounded),
+                        label: const Text('Open team'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(150, 56),
+                        ),
+                      ),
+                    ];
+
+                    if (constraints.maxWidth < 720) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          fields[0],
+                          const SizedBox(height: 12),
+                          fields[1],
+                          const SizedBox(height: 12),
+                          fields[2],
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 3, child: fields[0]),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 2, child: fields[1]),
+                        const SizedBox(width: 12),
+                        fields[2],
+                      ],
+                    );
+                  },
+                ),
+                if (snapshot.hasError) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Event lookup is temporarily unavailable.',
+                    style: TextStyle(color: Colors.orangeAccent),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -168,11 +369,9 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       borderRadius: BorderRadius.circular(100),
-      blurSigma: 14,
-      shadow: false,
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -208,15 +407,13 @@ class _HeroDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       borderRadius: BorderRadius.circular(100),
-      blurSigma: 12,
-      shadow: false,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 17, color: LiquidGlassColors.aqua),
+          Icon(icon, size: 17, color: AppColors.aqua),
           const SizedBox(width: 8),
           Text(
             label,
@@ -237,10 +434,9 @@ class _DashboardPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(22),
       borderRadius: BorderRadius.circular(28),
-      blurSigma: 26,
       child: Column(
         children: [
           Row(
@@ -249,12 +445,7 @@ class _DashboardPreview extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [
-                      HomePage._primary,
-                      HomePage._secondary,
-                    ],
-                  ),
+                  color: HomePage._primary,
                   borderRadius: BorderRadius.circular(13),
                 ),
                 child: const Icon(
@@ -379,14 +570,7 @@ class _PreviewStat extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.10),
-            Colors.white.withOpacity(0.025),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(15),
         border: Border.all(
           color: Colors.white.withOpacity(0.13),
@@ -431,12 +615,7 @@ class _PredictionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            HomePage._primary.withOpacity(0.1),
-            HomePage._secondary.withOpacity(0.06),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(17),
         border: Border.all(
           color: Colors.white.withOpacity(0.15),
@@ -804,12 +983,10 @@ class _FeatureCardState extends State<_FeatureCard> {
                 ]
               : [],
         ),
-        child: LiquidGlassPanel(
+        child: MattePanel(
           padding: const EdgeInsets.all(22),
           borderRadius: BorderRadius.circular(21),
           tint: _hovered ? HomePage._primary : HomePage._secondary,
-          blurSigma: _hovered ? 22 : 16,
-          shadow: false,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -817,12 +994,7 @@ class _FeatureCardState extends State<_FeatureCard> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      HomePage._primary.withOpacity(0.2),
-                      HomePage._secondary.withOpacity(0.12),
-                    ],
-                  ),
+                  color: AppColors.surfaceSoft,
                   borderRadius: BorderRadius.circular(15),
                   border: Border.all(
                     color: HomePage._primary.withOpacity(0.18),
@@ -867,14 +1039,13 @@ class _WorkflowBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: LiquidGlassPanel(
+      child: MattePanel(
         padding: const EdgeInsets.symmetric(
           horizontal: 28,
           vertical: 28,
         ),
         borderRadius: BorderRadius.circular(25),
         tint: HomePage._secondary,
-        blurSigma: 22,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final bool isWide = constraints.maxWidth >= 700;
@@ -967,12 +1138,7 @@ class _WorkflowStep extends StatelessWidget {
         vertical: 10,
       ),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.10),
-            HomePage._primary.withOpacity(0.035),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: Colors.white.withOpacity(0.14),

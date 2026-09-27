@@ -1,7 +1,5 @@
-import 'dart:ui';
-
 import 'package:app/APIService.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 
 class PitScouting extends StatefulWidget {
@@ -87,6 +85,7 @@ class _PitScoutingState extends State<PitScouting> {
     final rawStatus = results[1] as Map<String, dynamic>;
 
     final Map<int, bool> pitScoutingByTeam = {};
+    final Map<int, bool> imagesByTeam = {};
     final Map<int, bool> followUpsByTeam = {};
     final Map<int, int> pendingFollowUpsByTeam = {};
 
@@ -101,6 +100,7 @@ class _PitScoutingState extends State<PitScouting> {
         if (teamNumber == null) continue;
 
         pitScoutingByTeam[teamNumber] = rawEntry['pitscouting'] == true;
+        imagesByTeam[teamNumber] = rawEntry['image'] == true;
 
         // Missing values from older backend documents are treated as true.
         followUpsByTeam[teamNumber] = rawEntry['followups'] != false;
@@ -144,6 +144,7 @@ class _PitScoutingState extends State<PitScouting> {
         teamKey: entry.value,
         teamNumber: teamNumber,
         pitScoutingComplete: pitScoutingByTeam[teamNumber] ?? false,
+        imageComplete: imagesByTeam[teamNumber] ?? false,
         followUpsComplete: followUpsByTeam[teamNumber] ?? true,
         pendingFollowUpCount: pendingFollowUpsByTeam[teamNumber] ?? 0,
       );
@@ -154,6 +155,8 @@ class _PitScoutingState extends State<PitScouting> {
 
     final completedPitCount =
         teams.where((team) => team.pitScoutingComplete).length;
+    final completedImageCount =
+        teams.where((team) => team.imageComplete).length;
 
     final completedFollowUpCount =
         teams.where((team) => team.followUpsComplete).length;
@@ -165,6 +168,8 @@ class _PitScoutingState extends State<PitScouting> {
       teams: teams,
       completedPitCount:
           _parseInteger(rawStatus['completed_count']) ?? completedPitCount,
+      completedImageCount: _parseInteger(rawStatus['image_completed_count']) ??
+          completedImageCount,
       completedFollowUpCount: completedFollowUpCount,
       needsFollowUpCount: needsFollowUpCount,
       totalCount: _parseInteger(rawStatus['total_count']) ?? teams.length,
@@ -267,6 +272,19 @@ class _PitScoutingState extends State<PitScouting> {
     await _refresh();
   }
 
+  Future<void> _openRobotImage(
+    _PitTeamStatus team,
+  ) async {
+    await Navigator.pushNamed(
+      context,
+      '/event/${widget.event}/team/'
+      '${team.teamNumber}/image',
+    );
+
+    if (!mounted) return;
+    await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -359,11 +377,10 @@ class _PitScoutingState extends State<PitScouting> {
 
     final hasPendingFollowUps = pageData.needsFollowUpCount > 0;
 
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(16),
       borderRadius: BorderRadius.circular(20),
-      tint: LiquidGlassColors.primary,
-      blurSigma: 16,
+      tint: AppColors.primary,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -399,6 +416,23 @@ class _PitScoutingState extends State<PitScouting> {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
+                  SizedBox(
+                    width: cardWidth,
+                    child: _buildSummaryItem(
+                      icon: pageData.completedImageCount >= total && total > 0
+                          ? Icons.photo_library_rounded
+                          : Icons.add_a_photo_outlined,
+                      title: 'Robot Images',
+                      value: '${pageData.completedImageCount} / $total',
+                      subtitle: pageData.completedImageCount >= total &&
+                              total > 0
+                          ? 'Every team has an image'
+                          : '${total - pageData.completedImageCount} remaining',
+                      color: pageData.completedImageCount >= total && total > 0
+                          ? const Color(0xFF4ADE80)
+                          : const Color(0xFFC8A7FF),
+                    ),
+                  ),
                   SizedBox(
                     width: cardWidth,
                     child: _buildSummaryItem(
@@ -488,14 +522,7 @@ class _PitScoutingState extends State<PitScouting> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withOpacity(0.15),
-            Colors.white.withOpacity(0.035),
-          ],
-        ),
+        color: AppColors.surfaceSoft,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: color.withOpacity(0.25),
@@ -560,12 +587,10 @@ class _PitScoutingState extends State<PitScouting> {
   }) {
     final isSearching = _searchQuery.trim().isNotEmpty;
 
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(12),
       borderRadius: BorderRadius.circular(20),
-      tint: LiquidGlassColors.aqua,
-      blurSigma: 16,
-      shadow: false,
+      tint: AppColors.aqua,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -612,13 +637,13 @@ class _PitScoutingState extends State<PitScouting> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: LiquidGlassColors.border,
+                  color: AppColors.border,
                 ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: LiquidGlassColors.border,
+                  color: AppColors.border,
                 ),
               ),
               focusedBorder: OutlineInputBorder(
@@ -663,181 +688,192 @@ class _PitScoutingState extends State<PitScouting> {
       builder: (context, constraints) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(18),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: 18,
-              sigmaY: 18,
-            ),
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.white.withOpacity(0.145),
-                    LiquidGlassColors.primary.withOpacity(0.055),
-                    Colors.white.withOpacity(0.035),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: LiquidGlassColors.border,
-                  width: 1.1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.22),
-                    blurRadius: 24,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceSoft,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: AppColors.border,
+                width: 1.1,
               ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    // Fill the entire card on larger screens, but allow
-                    // horizontal scrolling on smaller screens.
-                    minWidth: constraints.maxWidth,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.22),
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  // Fill the entire card on larger screens, but allow
+                  // horizontal scrolling on smaller screens.
+                  minWidth: constraints.maxWidth,
+                ),
+                child: DataTable(
+                  headingRowHeight: 56,
+                  dataRowMinHeight: 68,
+                  dataRowMaxHeight: 78,
+                  horizontalMargin: 20,
+                  columnSpacing: 30,
+                  dividerThickness: 1,
+                  showCheckboxColumn: false,
+                  border: TableBorder(
+                    horizontalInside: BorderSide(
+                      color: Colors.white.withOpacity(0.07),
+                    ),
                   ),
-                  child: DataTable(
-                    headingRowHeight: 56,
-                    dataRowMinHeight: 68,
-                    dataRowMaxHeight: 78,
-                    horizontalMargin: 20,
-                    columnSpacing: 30,
-                    dividerThickness: 1,
-                    showCheckboxColumn: false,
-                    border: TableBorder(
-                      horizontalInside: BorderSide(
-                        color: Colors.white.withOpacity(0.07),
-                      ),
-                    ),
-                    headingRowColor: MaterialStateProperty.all(
-                      Colors.white.withOpacity(0.075),
-                    ),
-                    dataRowColor: MaterialStateProperty.resolveWith(
-                      (states) {
-                        if (states.contains(MaterialState.hovered)) {
-                          return Colors.white.withOpacity(0.075);
-                        }
+                  headingRowColor: MaterialStateProperty.all(
+                    Colors.white.withOpacity(0.075),
+                  ),
+                  dataRowColor: MaterialStateProperty.resolveWith(
+                    (states) {
+                      if (states.contains(MaterialState.hovered)) {
+                        return Colors.white.withOpacity(0.075);
+                      }
 
-                        if (states.contains(MaterialState.pressed)) {
-                          return Colors.white.withOpacity(0.10);
-                        }
+                      if (states.contains(MaterialState.pressed)) {
+                        return Colors.white.withOpacity(0.10);
+                      }
 
-                        return Colors.transparent;
-                      },
+                      return Colors.transparent;
+                    },
+                  ),
+                  columns: const [
+                    DataColumn(
+                      label: _TableHeading(
+                        icon: Icons.tag_rounded,
+                        text: 'Team',
+                      ),
                     ),
-                    columns: const [
-                      DataColumn(
-                        label: _TableHeading(
-                          icon: Icons.tag_rounded,
-                          text: 'Team',
-                        ),
+                    DataColumn(
+                      label: _TableHeading(
+                        icon: Icons.assignment_outlined,
+                        text: 'Pit Scouting',
                       ),
-                      DataColumn(
-                        label: _TableHeading(
-                          icon: Icons.assignment_outlined,
-                          text: 'Pit Scouting',
-                        ),
+                    ),
+                    DataColumn(
+                      label: _TableHeading(
+                        icon: Icons.photo_camera_outlined,
+                        text: 'Image',
                       ),
-                      DataColumn(
-                        label: _TableHeading(
-                          icon: Icons.build_circle_outlined,
-                          text: 'Follow-Up',
-                        ),
+                    ),
+                    DataColumn(
+                      label: _TableHeading(
+                        icon: Icons.build_circle_outlined,
+                        text: 'Follow-Up',
                       ),
-                      DataColumn(
-                        label: _TableHeading(
-                          icon: Icons.touch_app_outlined,
-                          text: 'Actions',
-                        ),
+                    ),
+                    DataColumn(
+                      label: _TableHeading(
+                        icon: Icons.touch_app_outlined,
+                        text: 'Actions',
                       ),
-                    ],
-                    rows: teams.map((team) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
+                    ),
+                  ],
+                  rows: teams.map((team) {
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color:
+                                      const Color(0xFF60A5FA).withOpacity(0.13),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
                                     color: const Color(0xFF60A5FA)
-                                        .withOpacity(0.13),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: const Color(0xFF60A5FA)
-                                          .withOpacity(0.22),
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.precision_manufacturing_outlined,
-                                    color: Color(0xFF93C5FD),
-                                    size: 21,
+                                        .withOpacity(0.22),
                                   ),
                                 ),
-                                const SizedBox(width: 11),
-                                Text(
-                                  '${team.teamNumber}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                child: const Icon(
+                                  Icons.precision_manufacturing_outlined,
+                                  color: Color(0xFF93C5FD),
+                                  size: 21,
                                 ),
-                              ],
-                            ),
-                          ),
-                          DataCell(
-                            _buildStatusBadge(
-                              complete: team.pitScoutingComplete,
-                              completeText: 'Complete',
-                              incompleteText: 'Incomplete',
-                              completeIcon: Icons.check_circle_outline_rounded,
-                              incompleteIcon: Icons.error_outline_rounded,
-                            ),
-                            onTap: () => _openPitScouting(team),
-                          ),
-                          DataCell(
-                            _buildFollowUpBadge(team),
-                            onTap: () => _openFollowUp(team),
-                          ),
-                          DataCell(
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _buildGlassActionButton(
-                                  icon: Icons.assignment_outlined,
-                                  label: 'Pit Scout',
-                                  color: const Color(0xFF93C5FD),
-                                  onPressed: () => _openPitScouting(team),
+                              ),
+                              const SizedBox(width: 11),
+                              Text(
+                                '${team.teamNumber}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                _buildGlassActionButton(
-                                  icon: team.followUpsComplete
-                                      ? Icons.visibility_outlined
-                                      : Icons.notification_important_outlined,
-                                  label: team.followUpsComplete
-                                      ? 'View'
-                                      : 'Follow Up',
-                                  color: team.followUpsComplete
-                                      ? const Color(0xFF4ADE80)
-                                      : const Color(0xFFF87171),
-                                  onPressed: () => _openFollowUp(team),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
-                      );
-                    }).toList(),
-                  ),
+                        ),
+                        DataCell(
+                          _buildStatusBadge(
+                            complete: team.pitScoutingComplete,
+                            completeText: 'Complete',
+                            incompleteText: 'Incomplete',
+                            completeIcon: Icons.check_circle_outline_rounded,
+                            incompleteIcon: Icons.error_outline_rounded,
+                          ),
+                          onTap: () => _openPitScouting(team),
+                        ),
+                        DataCell(
+                          _buildStatusBadge(
+                            complete: team.imageComplete,
+                            completeText: 'Collected',
+                            incompleteText: 'Not Collected',
+                            completeIcon: Icons.photo_library_rounded,
+                            incompleteIcon: Icons.add_a_photo_outlined,
+                          ),
+                          onTap: () => _openRobotImage(team),
+                        ),
+                        DataCell(
+                          _buildFollowUpBadge(team),
+                          onTap: () => _openFollowUp(team),
+                        ),
+                        DataCell(
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _buildGlassActionButton(
+                                icon: team.imageComplete
+                                    ? Icons.add_photo_alternate_outlined
+                                    : Icons.add_a_photo_outlined,
+                                label:
+                                    team.imageComplete ? 'Add Image' : 'Image',
+                                color: const Color(0xFFC8A7FF),
+                                onPressed: () => _openRobotImage(team),
+                              ),
+                              _buildGlassActionButton(
+                                icon: Icons.assignment_outlined,
+                                label: 'Pit Scout',
+                                color: const Color(0xFF93C5FD),
+                                onPressed: () => _openPitScouting(team),
+                              ),
+                              _buildGlassActionButton(
+                                icon: team.followUpsComplete
+                                    ? Icons.visibility_outlined
+                                    : Icons.notification_important_outlined,
+                                label: team.followUpsComplete
+                                    ? 'View'
+                                    : 'Follow Up',
+                                color: team.followUpsComplete
+                                    ? const Color(0xFF4ADE80)
+                                    : const Color(0xFFF87171),
+                                onPressed: () => _openFollowUp(team),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
                 ),
               ),
             ),
@@ -974,14 +1010,13 @@ class _PitScoutingState extends State<PitScouting> {
   }
 
   Widget _buildNoSearchResults() {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.symmetric(
         horizontal: 20,
         vertical: 32,
       ),
       borderRadius: BorderRadius.circular(20),
-      tint: LiquidGlassColors.secondary,
-      blurSigma: 14,
+      tint: AppColors.secondary,
       child: Column(
         children: [
           const Icon(
@@ -1032,6 +1067,7 @@ class _PitScoutingState extends State<PitScouting> {
 class _PitScoutingPageData {
   final List<_PitTeamStatus> teams;
   final int completedPitCount;
+  final int completedImageCount;
   final int completedFollowUpCount;
   final int needsFollowUpCount;
   final int totalCount;
@@ -1039,6 +1075,7 @@ class _PitScoutingPageData {
   const _PitScoutingPageData({
     required this.teams,
     required this.completedPitCount,
+    required this.completedImageCount,
     required this.completedFollowUpCount,
     required this.needsFollowUpCount,
     required this.totalCount,
@@ -1049,6 +1086,7 @@ class _PitTeamStatus {
   final String teamKey;
   final int teamNumber;
   final bool pitScoutingComplete;
+  final bool imageComplete;
   final bool followUpsComplete;
   final int pendingFollowUpCount;
 
@@ -1056,6 +1094,7 @@ class _PitTeamStatus {
     required this.teamKey,
     required this.teamNumber,
     required this.pitScoutingComplete,
+    required this.imageComplete,
     required this.followUpsComplete,
     required this.pendingFollowUpCount,
   });

@@ -1,12 +1,11 @@
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:app/APIService.dart';
 import 'package:app/models/2026Pitscouting.dart';
 import 'package:app/models/scout_info.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -35,9 +34,25 @@ class _EditableAutoPath {
 }
 
 class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
+  static const Set<String> _preloadLocations = {
+    'Preload Left',
+    'Preload Center',
+    'Preload Right',
+    // Kept for validation of routines saved before the label was corrected.
+    'Start Left',
+    'Start Center',
+    'Start Right',
+  };
+  static const Set<String> _fieldCrossings = {
+    'Went Under Left Trench',
+    'Went Over Left Bump',
+    'Went Over Right Bump',
+    'Went Under Right Trench',
+  };
   final TextEditingController _favoriteRobotPartController =
       TextEditingController();
   final TextEditingController _commentController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   bool _trench = false;
   bool _bump = false;
@@ -99,7 +114,20 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
       return;
     }
 
+    for (final path in _autoPaths.where((path) => path.steps.isNotEmpty)) {
+      final error = _validateAutoSteps(path.steps);
+      if (error != null) {
+        _showMessage('${path.name}: $error');
+        return;
+      }
+    }
+
     final auth = context.read<AuthService>();
+    final groupId = auth.groupId;
+    if (groupId == null || groupId.trim().isEmpty) {
+      _showMessage('Join a scouting group before submitting pit data.');
+      return;
+    }
 
     final savedAutoPaths = _autoPaths
         .where((path) => path.steps.isNotEmpty)
@@ -111,16 +139,17 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
         )
         .toList();
 
+    final scoutInfo = ScoutInfo(
+      userId: auth.username ?? '',
+      firstName: auth.firstName ?? '',
+      username: auth.username ?? '',
+      team: auth.team.toString(),
+    );
     final pitData = PitScouting2026(
       event: widget.eventCode,
       team: widget.teamNumber,
-      groupId: auth.groupId,
-      scoutInfo: ScoutInfo(
-        userId: auth.username ?? '',
-        firstName: auth.firstName ?? '',
-        username: auth.username ?? '',
-        team: auth.team.toString(),
-      ),
+      groupId: groupId,
+      scoutInfo: scoutInfo,
       data: Data(
         trench: _trench,
         bump: _bump,
@@ -141,8 +170,9 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
 
     setState(() => _isLoading = true);
 
+    final apiService = APIService();
     try {
-      await APIService().submitPitScouting(pitData);
+      await apiService.submitPitScouting(pitData);
 
       if (!mounted) return;
 
@@ -153,10 +183,16 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
       );
 
       _resetForm();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
+      });
     } catch (error) {
       if (!mounted) return;
       _showMessage('Error: $error');
     } finally {
+      apiService.dispose();
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -171,6 +207,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
       _climb = null;
       _driveTrain = null;
       _driverEvents = 0;
+      _bps = 0;
 
       _autoPaths
         ..clear()
@@ -228,9 +265,9 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
         return Dialog(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          child: LiquidGlassPanel(
+          child: MattePanel(
             padding: const EdgeInsets.all(22),
-            tint: LiquidGlassColors.secondary,
+            tint: AppColors.secondary,
             borderRadius: BorderRadius.circular(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -239,7 +276,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
                 const Text(
                   'Rename autonomous path',
                   style: TextStyle(
-                    color: LiquidGlassColors.text,
+                    color: AppColors.text,
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
@@ -294,8 +331,72 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
   }
 
   void _addAutoStep(String step) {
+    if (!_canAddAutoStep(step)) return;
     setState(() {
       _selectedAutoPath.steps.add(step);
+    });
+  }
+
+  String? get _lastAutoMovement {
+    for (final step in _selectedAutoPath.steps.reversed) {
+      if (step != 'Shot at Hub') return step;
+    }
+    return null;
+  }
+
+  bool _canAddAutoStep(String step) {
+    final steps = _selectedAutoPath.steps;
+    if (_preloadLocations.contains(step)) return steps.isEmpty;
+    if (steps.isEmpty || !_preloadLocations.contains(steps.first)) {
+      return false;
+    }
+    if (step == 'Shot at Hub') return true;
+    if (step == 'Intaked at Neutral Zone') {
+      return _fieldCrossings.contains(_lastAutoMovement);
+    }
+    if (step == 'Intaked At Depot' &&
+        _lastAutoMovement == 'Intaked at Neutral Zone') {
+      return false;
+    }
+    return _lastAutoMovement != step;
+  }
+
+  String? _validateAutoSteps(List<String> steps) {
+    if (steps.isEmpty) return null;
+    if (!_preloadLocations.contains(steps.first)) {
+      return 'choose a preload location first.';
+    }
+    String? lastMovement = steps.first;
+    for (final step in steps.skip(1)) {
+      if (_preloadLocations.contains(step)) {
+        return 'only one preload location is allowed.';
+      }
+      if (step == 'Intaked at Neutral Zone' &&
+          !_fieldCrossings.contains(lastMovement)) {
+        return 'select a trench or bump before the neutral zone.';
+      }
+      if (step == 'Intaked At Depot' &&
+          lastMovement == 'Intaked at Neutral Zone') {
+        return 'cross the field barrier before returning to the depot.';
+      }
+      if (step != 'Shot at Hub') lastMovement = step;
+    }
+    return null;
+  }
+
+  void _moveAutoStep(_EditableAutoPath path, int index, int delta) {
+    final candidate = List<String>.from(path.steps);
+    final step = candidate.removeAt(index);
+    candidate.insert(index + delta, step);
+    final error = _validateAutoSteps(candidate);
+    if (error != null) {
+      _showMessage('That order is not a possible auto: $error');
+      return;
+    }
+    setState(() {
+      path.steps
+        ..clear()
+        ..addAll(candidate);
     });
   }
 
@@ -303,6 +404,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
   void dispose() {
     _favoriteRobotPartController.dispose();
     _commentController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -316,6 +418,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
           children: [
             Expanded(
               child: ListView(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
                   _buildHeaderCard(),
@@ -768,6 +871,33 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
 
     return [
       _buildFieldButton(
+        x: 90,
+        y: 105,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Left',
+        label: 'Preload L',
+        size: buttonSize,
+      ),
+      _buildFieldButton(
+        x: 90,
+        y: 250,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Center',
+        label: 'Preload C',
+        size: buttonSize,
+      ),
+      _buildFieldButton(
+        x: 90,
+        y: 395,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Right',
+        label: 'Preload R',
+        size: buttonSize,
+      ),
+      _buildFieldButton(
         x: 260,
         y: 130,
         fieldPixelWidth: width,
@@ -842,6 +972,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
     required String label,
     required double size,
   }) {
+    final enabled = _canAddAutoStep(value);
     final px = (x / _fieldWidthUnits) * fieldPixelWidth;
     final py = (y / _fieldHeightUnits) * fieldPixelHeight;
 
@@ -855,14 +986,20 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
       left: left,
       top: top,
       child: Tooltip(
-        message: value,
+        message: enabled
+            ? value
+            : (_selectedAutoPath.steps.isEmpty
+                ? 'Choose a preload location first'
+                : 'That move is not possible from the current location'),
         child: Material(
-          color: Colors.blueAccent.withValues(alpha: 0.95),
+          color: enabled
+              ? Colors.blueAccent.withValues(alpha: 0.95)
+              : Colors.blueGrey.withValues(alpha: 0.62),
           shape: const CircleBorder(),
           elevation: 5,
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: () => _addAutoStep(value),
+            onTap: enabled ? () => _addAutoStep(value) : null,
             child: Container(
               width: size,
               height: size,
@@ -1026,10 +1163,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
                       onPressed: index == 0
                           ? null
                           : () {
-                              setState(() {
-                                final step = path.steps.removeAt(index);
-                                path.steps.insert(index - 1, step);
-                              });
+                              _moveAutoStep(path, index, -1);
                             },
                       icon: const Icon(Icons.keyboard_arrow_up_rounded),
                       color: Colors.white60,
@@ -1039,10 +1173,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
                       onPressed: index == path.steps.length - 1
                           ? null
                           : () {
-                              setState(() {
-                                final step = path.steps.removeAt(index);
-                                path.steps.insert(index + 1, step);
-                              });
+                              _moveAutoStep(path, index, 1);
                             },
                       icon: const Icon(Icons.keyboard_arrow_down_rounded),
                       color: Colors.white60,
@@ -1050,7 +1181,13 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
                     IconButton(
                       tooltip: 'Remove step',
                       onPressed: () {
-                        setState(() => path.steps.removeAt(index));
+                        setState(() {
+                          if (index == 0 && _preloadLocations.contains(item)) {
+                            path.steps.clear();
+                          } else {
+                            path.steps.removeAt(index);
+                          }
+                        });
                       },
                       icon: const Icon(Icons.close_rounded),
                       color: Colors.redAccent,
@@ -1358,7 +1495,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: value,
-          dropdownColor: LiquidGlassColors.glassStrong,
+          dropdownColor: AppColors.surfaceRaised,
           iconEnabledColor: Colors.white60,
           style: const TextStyle(
             color: Colors.white,
@@ -1450,11 +1587,10 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
   Widget _sectionContainer({
     required Widget child,
   }) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(16),
       borderRadius: BorderRadius.circular(20),
-      tint: LiquidGlassColors.primary,
-      blurSigma: 14,
+      tint: AppColors.primary,
       child: child,
     );
   }
@@ -1502,52 +1638,43 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
 
   Widget _buildSubmitArea() {
     return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                LiquidGlassColors.glassStrong.withValues(alpha: 0.93),
-                LiquidGlassColors.glass.withValues(alpha: 0.82),
-              ],
-            ),
-            border: const Border(
-              top: BorderSide(color: LiquidGlassColors.border),
-            ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceSoft,
+          border: const Border(
+            top: BorderSide(color: AppColors.border),
           ),
-          child: SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: _isLoading ? null : _submit,
-              icon: _isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.send_rounded),
-              label: Text(
-                _isLoading ? 'Submitting...' : 'Submit Pit Scouting',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    LiquidGlassColors.primary.withValues(alpha: 0.82),
-                foregroundColor: Colors.white,
-                disabledBackgroundColor:
-                    LiquidGlassColors.glassStrong.withValues(alpha: 0.72),
-                disabledForegroundColor: Colors.white60,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: const BorderSide(color: LiquidGlassColors.border),
-                ),
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: _isLoading ? null : _submit,
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.send_rounded),
+            label: Text(
+              _isLoading ? 'Submitting...' : 'Submit Pit Scouting',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary.withValues(alpha: 0.82),
+              foregroundColor: Colors.white,
+              disabledBackgroundColor:
+                  AppColors.surfaceRaised.withValues(alpha: 0.72),
+              disabledForegroundColor: Colors.white60,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: AppColors.border),
               ),
             ),
           ),

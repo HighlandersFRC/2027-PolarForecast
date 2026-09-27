@@ -4,7 +4,7 @@ import 'package:app/APIService.dart';
 import 'package:app/models/2026Matchscouting.dart';
 import 'package:app/models/scout_info.dart';
 import 'package:app/services/auth_service.dart';
-import 'package:app/widgets/liquid_glass.dart';
+import 'package:app/widgets/matte_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -25,6 +25,23 @@ enum StationMode {
 }
 
 class _MatchScoutingState extends State<MatchScouting> {
+  static const int _maxAutoFuel = 500;
+  static const int _maxTeleopFuel = 1000;
+  static const Set<String> _preloadLocations = {
+    'Preload Left',
+    'Preload Center',
+    'Preload Right',
+    // Kept for validation of records created before the label was corrected.
+    'Start Left',
+    'Start Center',
+    'Start Right',
+  };
+  static const Set<String> _fieldCrossings = {
+    'Went Under Left Trench',
+    'Went Over Left Bump',
+    'Went Over Right Bump',
+    'Went Under Right Trench',
+  };
   final uri = Uri.base;
 
   String get rawEvent =>
@@ -104,7 +121,7 @@ class _MatchScoutingState extends State<MatchScouting> {
   }
 
   Color _chipColor(StationMode mode, bool selected) {
-    if (!selected) return LiquidGlassColors.glassSoft;
+    if (!selected) return AppColors.surfaceSoft;
 
     switch (mode) {
       case StationMode.red1:
@@ -221,6 +238,23 @@ class _MatchScoutingState extends State<MatchScouting> {
     final match = int.parse(_matchController.text.trim());
     final team = selectedTeam;
 
+    final autoError = _validateAutoPath();
+    if (autoError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(autoError)),
+      );
+      return;
+    }
+
+    if (_autoFuel > _maxAutoFuel || _teleopFuel > _maxTeleopFuel) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fuel count is above the allowed maximum.'),
+        ),
+      );
+      return;
+    }
+
     if (team == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select a valid station")),
@@ -304,20 +338,21 @@ class _MatchScoutingState extends State<MatchScouting> {
     required VoidCallback onRemove,
     required VoidCallback onAddFive,
     required VoidCallback onRemoveFive,
+    required Color accentColor,
+    required int maximum,
+    required String periodLabel,
   }) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: const EdgeInsets.all(20),
       borderRadius: BorderRadius.circular(18),
-      tint: _primaryColor,
-      blurSigma: 8,
-      shadow: false,
+      tint: accentColor,
       child: Column(
         children: [
           Text(
-            title,
+            '$title  •  $periodLabel',
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
+            style: TextStyle(
+              color: accentColor,
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
@@ -331,6 +366,11 @@ class _MatchScoutingState extends State<MatchScouting> {
               color: Colors.white,
               height: 1,
             ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            'Maximum $maximum',
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
           const SizedBox(height: 20),
           Row(
@@ -359,8 +399,8 @@ class _MatchScoutingState extends State<MatchScouting> {
                 child: _buildCounterButton(
                   label: "+1",
                   icon: Icons.add_rounded,
-                  onPressed: onAdd,
-                  backgroundColor: _primaryColor.withValues(alpha: 0.78),
+                  onPressed: value >= maximum ? null : onAdd,
+                  backgroundColor: accentColor.withValues(alpha: 0.78),
                   foregroundColor: Colors.white,
                 ),
               ),
@@ -369,8 +409,8 @@ class _MatchScoutingState extends State<MatchScouting> {
                 child: _buildCounterButton(
                   label: "+5",
                   icon: Icons.keyboard_double_arrow_up_rounded,
-                  onPressed: onAddFive,
-                  backgroundColor: _primaryColor.withValues(alpha: 0.78),
+                  onPressed: value >= maximum ? null : onAddFive,
+                  backgroundColor: accentColor.withValues(alpha: 0.78),
                   foregroundColor: Colors.white,
                 ),
               ),
@@ -384,7 +424,7 @@ class _MatchScoutingState extends State<MatchScouting> {
   Widget _buildCounterButton({
     required String label,
     required IconData icon,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     required Color backgroundColor,
     required Color foregroundColor,
   }) {
@@ -427,16 +467,63 @@ class _MatchScoutingState extends State<MatchScouting> {
     );
   }
 
+  bool get _hasPreloadLocation =>
+      _autoPath.isNotEmpty && _preloadLocations.contains(_autoPath.first);
+
+  String? get _lastMovementAction {
+    for (final action in _autoPath.reversed) {
+      if (action != 'Shot at Hub') return action;
+    }
+    return null;
+  }
+
+  bool _canAddAutoAction(String action) {
+    if (_preloadLocations.contains(action)) return _autoPath.isEmpty;
+    if (!_hasPreloadLocation) return false;
+    if (action == 'Shot at Hub') return true;
+
+    final last = _lastMovementAction;
+    if (action == 'Intaked at Neutral Zone') {
+      return last != null && _fieldCrossings.contains(last);
+    }
+    if (action == 'Intaked At Depot' && last == 'Intaked at Neutral Zone') {
+      return false;
+    }
+    return last != action;
+  }
+
+  String? _validateAutoPath() {
+    if (_autoPath.isEmpty) {
+      return _autoFuel > 0
+          ? 'Choose where the robot shoots its preload.'
+          : null;
+    }
+    if (!_preloadLocations.contains(_autoPath.first)) {
+      return 'Choose a preload location before recording auto actions.';
+    }
+
+    String? lastMovement = _autoPath.first;
+    for (final action in _autoPath.skip(1)) {
+      if (_preloadLocations.contains(action)) {
+        return 'Only one preload location is allowed.';
+      }
+      if (action == 'Intaked at Neutral Zone' &&
+          !_fieldCrossings.contains(lastMovement)) {
+        return 'Select a trench or bump before entering the neutral zone.';
+      }
+      if (action != 'Shot at Hub') lastMovement = action;
+    }
+    return null;
+  }
+
   Widget _buildSectionCard({
     required Widget child,
     EdgeInsets padding = const EdgeInsets.all(14),
   }) {
-    return LiquidGlassPanel(
+    return MattePanel(
       padding: padding,
       borderRadius: BorderRadius.circular(16),
       tint: _primaryColor,
-      blurSigma: 8,
-      shadow: false,
       child: child,
     );
   }
@@ -467,6 +554,7 @@ class _MatchScoutingState extends State<MatchScouting> {
     IconData icon = Icons.add,
     double size = 44,
   }) {
+    final enabled = _canAddAutoAction(value);
     final px = (x / _fieldWidthUnits) * fieldPixelWidth;
     final py = (y / _fieldHeightUnits) * fieldPixelHeight;
 
@@ -481,18 +569,26 @@ class _MatchScoutingState extends State<MatchScouting> {
       left: left,
       top: top,
       child: Tooltip(
-        message: value,
+        message: enabled
+            ? value
+            : (_hasPreloadLocation
+                ? 'That move is not possible from the current location'
+                : 'Choose a preload location first'),
         child: Material(
-          color: _primaryColor.withOpacity(0.95),
+          color: enabled
+              ? _primaryColor.withOpacity(0.95)
+              : Colors.blueGrey.withValues(alpha: 0.62),
           shape: const CircleBorder(),
           elevation: 5,
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: () {
-              setState(() {
-                _autoPath.add(value);
-              });
-            },
+            onTap: enabled
+                ? () {
+                    setState(() {
+                      _autoPath.add(value);
+                    });
+                  }
+                : null,
             child: Container(
               width: size,
               height: size,
@@ -545,6 +641,36 @@ class _MatchScoutingState extends State<MatchScouting> {
     final double buttonSize = (width * 0.08).clamp(48.0, 96.0).toDouble();
 
     return [
+      _buildFieldButton(
+        x: 90,
+        y: 105,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Left',
+        label: 'Preload L',
+        icon: Icons.adjust_rounded,
+        size: buttonSize,
+      ),
+      _buildFieldButton(
+        x: 90,
+        y: 250,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Center',
+        label: 'Preload C',
+        icon: Icons.adjust_rounded,
+        size: buttonSize,
+      ),
+      _buildFieldButton(
+        x: 90,
+        y: 395,
+        fieldPixelWidth: width,
+        fieldPixelHeight: height,
+        value: 'Preload Right',
+        label: 'Preload R',
+        icon: Icons.adjust_rounded,
+        size: buttonSize,
+      ),
       _buildFieldButton(
         x: 260,
         y: 130,
@@ -662,7 +788,7 @@ class _MatchScoutingState extends State<MatchScouting> {
                               ),
                               SizedBox(height: 3),
                               Text(
-                                "Tap locations in the order the robot will visit them.",
+                                "Choose the preload location, then tap only the route the robot actually drives.",
                                 style: TextStyle(
                                   color: Colors.white54,
                                   fontSize: 13,
@@ -964,14 +1090,6 @@ class _MatchScoutingState extends State<MatchScouting> {
         color: const Color(0xFF17191E),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white10),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF1C1F25),
-            Color(0xFF131519),
-          ],
-        ),
       ),
       child: Stack(
         children: [
@@ -1174,7 +1292,11 @@ class _MatchScoutingState extends State<MatchScouting> {
                       tooltip: "Remove step",
                       onPressed: () {
                         setState(() {
-                          _autoPath.removeAt(index);
+                          if (index == 0 && _preloadLocations.contains(item)) {
+                            _autoPath.clear();
+                          } else {
+                            _autoPath.removeAt(index);
+                          }
                         });
                       },
                       icon: const Icon(
@@ -1236,9 +1358,8 @@ class _MatchScoutingState extends State<MatchScouting> {
   }) {
     final color = accentColor ?? _primaryColor;
 
-    return LiquidGlassPanel(
+    return MattePanel(
       tint: color,
-      blurSigma: 16,
       borderRadius: BorderRadius.circular(22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1247,14 +1368,7 @@ class _MatchScoutingState extends State<MatchScouting> {
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withValues(alpha: 0.16),
-                  Colors.white.withValues(alpha: 0.025),
-                ],
-              ),
+              color: AppColors.surfaceSoft,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(22),
               ),
@@ -1410,13 +1524,13 @@ class _MatchScoutingState extends State<MatchScouting> {
           labelText: label,
           filled: true,
           fillColor: Colors.white.withValues(alpha: 0.07),
-          labelStyle: const TextStyle(color: LiquidGlassColors.textMuted),
+          labelStyle: const TextStyle(color: AppColors.textMuted),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
-            borderSide: const BorderSide(color: LiquidGlassColors.border),
+            borderSide: const BorderSide(color: AppColors.border),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
@@ -1516,7 +1630,7 @@ class _MatchScoutingState extends State<MatchScouting> {
                           side: BorderSide(
                             color: selected
                                 ? _chipColor(mode, true).withValues(alpha: 0.70)
-                                : LiquidGlassColors.border,
+                                : AppColors.border,
                           ),
                           onSelected: _submitting
                               ? null
@@ -1552,20 +1666,27 @@ class _MatchScoutingState extends State<MatchScouting> {
                     buildCounterCard(
                       title: "Auto Fuel",
                       value: _autoFuel,
+                      accentColor: const Color(0xFFFFB74D),
+                      maximum: _maxAutoFuel,
+                      periodLabel: 'AUTO',
                       onAdd: () {
-                        setState(() => _autoFuel += 1);
+                        setState(() {
+                          _autoFuel = (_autoFuel + 1).clamp(0, _maxAutoFuel);
+                        });
                       },
                       onRemove: () {
                         setState(() {
-                          _autoFuel = (_autoFuel - 1).clamp(0, 999);
+                          _autoFuel = (_autoFuel - 1).clamp(0, _maxAutoFuel);
                         });
                       },
                       onAddFive: () {
-                        setState(() => _autoFuel += 5);
+                        setState(() {
+                          _autoFuel = (_autoFuel + 5).clamp(0, _maxAutoFuel);
+                        });
                       },
                       onRemoveFive: () {
                         setState(() {
-                          _autoFuel = (_autoFuel - 5).clamp(0, 999);
+                          _autoFuel = (_autoFuel - 5).clamp(0, _maxAutoFuel);
                         });
                       },
                     ),
@@ -1585,20 +1706,27 @@ class _MatchScoutingState extends State<MatchScouting> {
                 child: buildCounterCard(
                   title: "Teleop Fuel",
                   value: _teleopFuel,
+                  accentColor: const Color(0xFF4C8DFF),
+                  maximum: _maxTeleopFuel,
+                  periodLabel: 'TELEOP',
                   onAdd: () {
-                    setState(() => _teleopFuel += 1);
+                    setState(() {
+                      _teleopFuel = (_teleopFuel + 1).clamp(0, _maxTeleopFuel);
+                    });
                   },
                   onRemove: () {
                     setState(() {
-                      _teleopFuel = (_teleopFuel - 1).clamp(0, 999);
+                      _teleopFuel = (_teleopFuel - 1).clamp(0, _maxTeleopFuel);
                     });
                   },
                   onAddFive: () {
-                    setState(() => _teleopFuel += 5);
+                    setState(() {
+                      _teleopFuel = (_teleopFuel + 5).clamp(0, _maxTeleopFuel);
+                    });
                   },
                   onRemoveFive: () {
                     setState(() {
-                      _teleopFuel = (_teleopFuel - 5).clamp(0, 999);
+                      _teleopFuel = (_teleopFuel - 5).clamp(0, _maxTeleopFuel);
                     });
                   },
                 ),

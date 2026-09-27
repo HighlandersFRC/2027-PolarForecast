@@ -1,3 +1,5 @@
+import base64
+import binascii
 import random
 import re
 import string
@@ -5,7 +7,7 @@ import string
 from bson import ObjectId
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pymongo import MongoClient
 import requests
 from datetime import datetime, timedelta, timezone
@@ -15,6 +17,8 @@ from time import sleep
 from models.match_scouting import MatchScouting
 from models.pit_scouting import Pitscouting
 from models.follow_ups import FollowUp
+from models.picklist import PicklistUpdate
+from models.robot_image import RobotImageUpload
 from LinReg import linreg, linreg_TBA
 from Predictions import predict as predict_matches
 from config import (
@@ -22,13 +26,26 @@ from config import (
     MONGO_URI,
     KEYCLOAK_BASE_URL,
     KEYCLOAK_REALM,
+    KEYCLOAK_ADMIN_AUTH_MODE,
+    KEYCLOAK_ADMIN_REALM,
+    KEYCLOAK_ADMIN_USERNAME,
+    KEYCLOAK_ADMIN_PASSWORD,
     KEYCLOAK_ADMIN_CLIENT_ID,
     KEYCLOAK_ADMIN_CLIENT_SECRET,
+)
+from keycloak_client import (
+    KeycloakAdminAuthError,
+    request_keycloak_admin_token,
 )
 from routers.data import DataDependencies, create_data_router
 from routers.groups import GroupDependencies, create_group_router
 from routers.users import UserDependencies, create_user_router
-from tba_client import DEFAULT_TBA_HEADERS, get_tba_response, parse_tba_json
+from tba_client import (
+    DEFAULT_TBA_HEADERS,
+    get_tba_json,
+    get_tba_response,
+    parse_tba_json,
+)
 
 
 
@@ -102,6 +119,8 @@ TBACollection = db["TBAData"]
 GroupStatsCollection = db["GroupStats"]
 GroupPitStatus = db["GroupPitScoutingStatus"]
 FollowUpCollection = db["2026FollowUps"]
+PicklistCollection = db["Picklists"]
+RobotImagesCollection = db["RobotImages"]
 
 
 cache_update_lock = Lock()
@@ -126,6 +145,207 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.get(
+    "/teams/{team}/media",
+    tags=["stats"],
+)
+def get_team_media(team: int, year: int = 2026):
+    """Return the available robot/team images exposed by TBA."""
+    if team <= 0:
+        raise HTTPException(status_code=400, detail="Invalid team number")
+
+    media = get_tba_json(
+        f"team/frc{team}/media/{year}",
+        default=[],
+        expected_type=list,
+    )
+
+    normalized = []
+    for item in media:
+        if not isinstance(item, dict):
+            continue
+
+        details = item.get("details")
+        details = details if isinstance(details, dict) else {}
+        direct_url = item.get("direct_url") or details.get("image")
+        view_url = item.get("view_url")
+
+        if direct_url or view_url:
+            normalized.append({
+                "type": str(item.get("type") or "image"),
+                "direct_url": direct_url,
+                "view_url": view_url,
+            })
+
+    normalized.sort(
+        key=lambda item: 0 if item["type"] in {
+            "cdphotothread",
+            "imgur",
+        } else 1
+    )
+    return {"team": team, "year": year, "media": normalized}
+
+
+_ROBOT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+_ROBOT_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+
+
+def _robot_image_matches_content_type(
+    image_bytes: bytes,
+    content_type: str,
+) -> bool:
+    if content_type == "image/jpeg":
+        return image_bytes.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return (
+            len(image_bytes) >= 12
+            and image_bytes.startswith(b"RIFF")
+            and image_bytes[8:12] == b"WEBP"
+        )
+    return False
+
+
+@app.post("/robot-images", tags=["scouting"])
+def post_robot_image(upload: RobotImageUpload):
+    document = upload.model_dump()
+    group_id = str(document["groupId"])
+    scout_info = document["scoutInfo"]
+    content_type = document["content_type"].lower().strip()
+
+    if not scout_info_is_current_group_member(group_id, scout_info):
+        raise HTTPException(
+            status_code=403,
+            detail="Scout is not a current member of this group",
+        )
+
+    if content_type not in _ROBOT_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Robot photo must be JPEG, PNG, or WebP",
+        )
+
+    try:
+        image_bytes = base64.b64decode(
+            document["image_base64"],
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="Robot photo is not valid base64 data",
+        )
+
+    if len(image_bytes) > _ROBOT_IMAGE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Robot photo must be 8 MB or smaller",
+        )
+    if not _robot_image_matches_content_type(image_bytes, content_type):
+        raise HTTPException(
+            status_code=400,
+            detail="Robot photo contents do not match its file type",
+        )
+
+    image_document = {
+        "group_id": group_id,
+        "event": str(document["event"]),
+        "team": int(document["team"]),
+        "scout_info": scout_info,
+        "content_type": content_type,
+        "capture_source": str(document["capture_source"]),
+        "image": image_bytes,
+        "size_bytes": len(image_bytes),
+        "created_at": now_utc(),
+    }
+    result = RobotImagesCollection.insert_one(image_document)
+    rebuild_group_pit_status(
+        group_id,
+        str(document["event"]),
+    )
+
+    return {
+        "success": True,
+        "image_id": str(result.inserted_id),
+    }
+
+
+@app.get(
+    "/robot-images/{group_id}/events/{event}/teams/{team}",
+    tags=["stats"],
+)
+def get_robot_images(
+    group_id: str,
+    event: str,
+    team: int,
+    username: str,
+):
+    if not username_is_current_group_member(group_id, username):
+        raise HTTPException(status_code=403, detail="User not in group")
+
+    images = RobotImagesCollection.find(
+        {
+            "group_id": group_id,
+            "event": event,
+            "team": team,
+        },
+        {"image": 0},
+    ).sort("created_at", -1)
+
+    return {
+        "group_id": group_id,
+        "event": event,
+        "team": team,
+        "images": [
+            {
+                "id": str(image["_id"]),
+                "content_type": image.get("content_type", "image/jpeg"),
+                "capture_source": image.get("capture_source", "camera"),
+                "scout": image.get("scout_info", {}).get("username", ""),
+                "created_at": (
+                    image["created_at"].isoformat()
+                    if isinstance(image.get("created_at"), datetime)
+                    else None
+                ),
+            }
+            for image in images
+        ],
+    }
+
+
+@app.get("/robot-images/{image_id}/content", tags=["stats"])
+def get_robot_image_content(
+    image_id: str,
+    group_id: str,
+    username: str,
+):
+    if not username_is_current_group_member(group_id, username):
+        raise HTTPException(status_code=403, detail="User not in group")
+
+    try:
+        object_id = ObjectId(image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Robot image not found")
+
+    image = RobotImagesCollection.find_one({
+        "_id": object_id,
+        "group_id": group_id,
+    })
+    if image is None:
+        raise HTTPException(status_code=404, detail="Robot image not found")
+
+    return Response(
+        content=bytes(image["image"]),
+        media_type=image.get("content_type", "image/jpeg"),
+        headers={"Content-Disposition": "inline"},
+    )
 
 
 @app.post("/matchscouting", tags=["scouting"])
@@ -590,6 +810,13 @@ def ensure_database_indexes():
             ("match_key", 1),
         ]
     )
+    PicklistCollection.create_index(
+        [("group_id", 1), ("event_key", 1)],
+        unique=True,
+    )
+    RobotImagesCollection.create_index(
+        [("group_id", 1), ("event", 1), ("team", 1), ("created_at", -1)]
+    )
 
 
 @app.on_event("startup")
@@ -669,6 +896,88 @@ def scout_info_is_current_group_member(
         member_user_ids,
         member_usernames,
     )
+
+
+def username_is_current_group_member(
+    group_id: str,
+    username: str,
+) -> bool:
+    _, member_user_ids, member_usernames = (
+        get_group_member_identity_sets(str(group_id))
+    )
+    normalized = str(username).strip()
+    return (
+        normalized in member_usernames
+        or normalized in member_user_ids
+    )
+
+
+@app.get(
+    "/groups/{group_id}/events/{event}/picklist",
+    tags=["picklists"],
+)
+def get_group_picklist(
+    group_id: str,
+    event: str,
+    username: str,
+):
+    if not username_is_current_group_member(group_id, username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+
+    document = PicklistCollection.find_one(
+        {"group_id": str(group_id), "event_key": str(event)},
+        {"_id": 0},
+    )
+    return document or {
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "teams": [],
+    }
+
+
+@app.put(
+    "/groups/{group_id}/events/{event}/picklist",
+    tags=["picklists"],
+)
+def put_group_picklist(
+    group_id: str,
+    event: str,
+    update: PicklistUpdate,
+):
+    if not username_is_current_group_member(group_id, update.username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+
+    teams = [item.model_dump() for item in update.teams]
+    team_numbers = [item["team"] for item in teams]
+    if len(team_numbers) != len(set(team_numbers)):
+        raise HTTPException(
+            status_code=400,
+            detail="A team can only appear once in a picklist",
+        )
+
+    document = {
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "teams": teams,
+        "updated_by": update.username,
+        "updated_at": now_utc(),
+    }
+    PicklistCollection.update_one(
+        {"group_id": str(group_id), "event_key": str(event)},
+        {"$set": document},
+        upsert=True,
+    )
+
+    return {
+        **document,
+        "updated_at": document["updated_at"].isoformat(),
+    }
 
 
 def get_group_match_scouting(
@@ -1251,12 +1560,18 @@ def rebuild_group_pit_status(group_id: str, event: str):
         group_id,
         event,
     )
+    image_teams = get_collection_team_numbers(
+        RobotImagesCollection,
+        group_id,
+        event,
+    )
 
     all_teams = sorted(
         event_teams
         | completed_teams
         | match_scouting_teams
         | followup_teams
+        | image_teams
         | existing_teams
         | pending_followup_teams
     )
@@ -1265,6 +1580,7 @@ def rebuild_group_pit_status(group_id: str, event: str):
         {
             "team": team,
             "pitscouting": team in completed_teams,
+            "image": team in image_teams,
             "followups": team not in pending_followup_teams,
             "pending_followup_count": pending_followup_counts.get(team, 0),
         }
@@ -1273,6 +1589,9 @@ def rebuild_group_pit_status(group_id: str, event: str):
 
     completed_count = sum(
         1 for entry in data if entry["pitscouting"]
+    )
+    image_completed_count = sum(
+        1 for entry in data if entry["image"]
     )
     total_count = len(data)
     followup_counts = _followup_status_counts(data)
@@ -1284,6 +1603,7 @@ def rebuild_group_pit_status(group_id: str, event: str):
         "event": event,
         "data": data,
         "completed_count": completed_count,
+        "image_completed_count": image_completed_count,
         "remaining_count": total_count - completed_count,
         "total_count": total_count,
         "all_complete": total_count > 0 and completed_count == total_count,
@@ -1443,6 +1763,14 @@ def group_ids_for_event(event: str) -> list[str]:
         str(group_id)
         for group_id in FollowUpCollection.distinct(
             "groupId",
+            {"event": event},
+        )
+        if group_id
+    })
+    group_ids.update({
+        str(group_id)
+        for group_id in RobotImagesCollection.distinct(
+            "group_id",
             {"event": event},
         )
         if group_id
@@ -1936,77 +2264,22 @@ def update_database(year: str = YEAR):
 
 
 def get_keycloak_admin_token() -> str:
-    """Authenticate the backend's Keycloak service account with OIDC."""
-    token_url = (
-        f"{KEYCLOAK_BASE_URL.rstrip('/')}/realms/{KEYCLOAK_REALM}"
-        "/protocol/openid-connect/token"
-    )
-
+    """Authenticate with the configured local or deployed admin flow."""
     try:
-        response = requests.post(
-            token_url,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": KEYCLOAK_ADMIN_CLIENT_ID,
-                "client_secret": KEYCLOAK_ADMIN_CLIENT_SECRET,
-            },
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            timeout=20,
+        return request_keycloak_admin_token(
+            base_url=KEYCLOAK_BASE_URL,
+            realm=KEYCLOAK_ADMIN_REALM,
+            auth_mode=KEYCLOAK_ADMIN_AUTH_MODE,
+            client_id=KEYCLOAK_ADMIN_CLIENT_ID,
+            client_secret=KEYCLOAK_ADMIN_CLIENT_SECRET,
+            username=KEYCLOAK_ADMIN_USERNAME,
+            password=KEYCLOAK_ADMIN_PASSWORD,
         )
-    except requests.RequestException as error:
+    except KeycloakAdminAuthError as error:
         raise HTTPException(
             status_code=502,
-            detail=f"Could not reach Keycloak token endpoint: {error}",
+            detail=str(error),
         ) from error
-
-    try:
-        response_data = response.json()
-    except ValueError:
-        response_data = {}
-
-    if response.status_code != 200:
-        error_code = response_data.get("error")
-        error_description = response_data.get("error_description")
-
-        if error_code == "invalid_client":
-            reason = (
-                "Keycloak rejected the admin service client. Verify "
-                "KEYCLOAK_ADMIN_CLIENT_ID and "
-                "KEYCLOAK_ADMIN_CLIENT_SECRET."
-            )
-        elif error_code == "unauthorized_client":
-            reason = (
-                "The Keycloak client is not allowed to use service-account "
-                "authentication. Enable Service accounts roles for it."
-            )
-        else:
-            reason = (
-                error_description
-                or error_code
-                or "Keycloak returned a non-JSON error response."
-            )
-
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Keycloak service-account authentication failed "
-                f"({response.status_code}): {reason}"
-            ),
-        )
-
-    access_token = response_data.get("access_token")
-    if not isinstance(access_token, str) or not access_token:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Keycloak service-account response did not contain an "
-                "access_token."
-            ),
-        )
-
-    return access_token
 
 
 def _extract_group_id_from_location(location: str | None) -> str | None:
