@@ -28,6 +28,21 @@ mixin _$TeamStat {
   double get Teleop => throw _privateConstructorUsedError;
   double get Endgame => throw _privateConstructorUsedError;
   double get Climb => throw _privateConstructorUsedError;
+  double? get AutoFuelOPR => throw _privateConstructorUsedError;
+  double? get TeleopFuelOPR => throw _privateConstructorUsedError;
+  double? get TBAFuelOPR => throw _privateConstructorUsedError;
+  double? get TBANonFuelOPR => throw _privateConstructorUsedError;
+  double? get AverageAutoFuel => throw _privateConstructorUsedError;
+  double? get AverageTeleopFuel => throw _privateConstructorUsedError;
+  double? get AverageTotalFuel => throw _privateConstructorUsedError;
+  double? get CombinedFuelOPR => throw _privateConstructorUsedError;
+  double? get TBAOPR => throw _privateConstructorUsedError;
+  double get DeathRate => throw _privateConstructorUsedError;
+  double get DefenseRate => throw _privateConstructorUsedError;
+  int get DefenseCount => throw _privateConstructorUsedError;
+  int get MatchesPlayed => throw _privateConstructorUsedError;
+  int get ScoutEntries => throw _privateConstructorUsedError;
+  int get ScoutedMatches => throw _privateConstructorUsedError;
   List<TeamMatchHistory> get MatchHistory => throw _privateConstructorUsedError;
 
   /// Serializes this TeamStat to a JSON map.
@@ -53,6 +68,21 @@ abstract class $TeamStatCopyWith<$Res> {
       double Teleop,
       double Endgame,
       double Climb,
+      double? AutoFuelOPR,
+      double? TeleopFuelOPR,
+      double? TBAFuelOPR,
+      double? TBANonFuelOPR,
+      double? AverageAutoFuel,
+      double? AverageTeleopFuel,
+      double? AverageTotalFuel,
+      double? CombinedFuelOPR,
+      double? TBAOPR,
+      double DeathRate,
+      double DefenseRate,
+      int DefenseCount,
+      int MatchesPlayed,
+      int ScoutEntries,
+      int ScoutedMatches,
       List<TeamMatchHistory> MatchHistory});
 }
 
@@ -78,6 +108,21 @@ class _$TeamStatCopyWithImpl<$Res, $Val extends TeamStat>
     Object? Teleop = null,
     Object? Endgame = null,
     Object? Climb = null,
+    Object? AutoFuelOPR = freezed,
+    Object? TeleopFuelOPR = freezed,
+    Object? TBAFuelOPR = freezed,
+    Object? TBANonFuelOPR = freezed,
+    Object? AverageAutoFuel = freezed,
+    Object? AverageTeleopFuel = freezed,
+    Object? AverageTotalFuel = freezed,
+    Object? CombinedFuelOPR = freezed,
+    Object? TBAOPR = freezed,
+    Object? DeathRate = null,
+    Object? DefenseRate = null,
+    Object? DefenseCount = null,
+    Object? MatchesPlayed = null,
+    Object? ScoutEntries = null,
+    Object? ScoutedMatches = null,
     Object? MatchHistory = null,
   }) {
     return _then(_value.copyWith(
@@ -109,6 +154,66 @@ class _$TeamStatCopyWithImpl<$Res, $Val extends TeamStat>
           ? _value.Climb
           : Climb // ignore: cast_nullable_to_non_nullable
               as double,
+      AutoFuelOPR: freezed == AutoFuelOPR
+          ? _value.AutoFuelOPR
+          : AutoFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TeleopFuelOPR: freezed == TeleopFuelOPR
+          ? _value.TeleopFuelOPR
+          : TeleopFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBAFuelOPR: freezed == TBAFuelOPR
+          ? _value.TBAFuelOPR
+          : TBAFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBANonFuelOPR: freezed == TBANonFuelOPR
+          ? _value.TBANonFuelOPR
+          : TBANonFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageAutoFuel: freezed == AverageAutoFuel
+          ? _value.AverageAutoFuel
+          : AverageAutoFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageTeleopFuel: freezed == AverageTeleopFuel
+          ? _value.AverageTeleopFuel
+          : AverageTeleopFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageTotalFuel: freezed == AverageTotalFuel
+          ? _value.AverageTotalFuel
+          : AverageTotalFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      CombinedFuelOPR: freezed == CombinedFuelOPR
+          ? _value.CombinedFuelOPR
+          : CombinedFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBAOPR: freezed == TBAOPR
+          ? _value.TBAOPR
+          : TBAOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      DeathRate: null == DeathRate
+          ? _value.DeathRate
+          : DeathRate // ignore: cast_nullable_to_non_nullable
+              as double,
+      DefenseRate: null == DefenseRate
+          ? _value.DefenseRate
+          : DefenseRate // ignore: cast_nullable_to_non_nullable
+              as double,
+      DefenseCount: null == DefenseCount
+          ? _value.DefenseCount
+          : DefenseCount // ignore: cast_nullable_to_non_nullable
+              as int,
+      MatchesPlayed: null == MatchesPlayed
+          ? _value.MatchesPlayed
+          : MatchesPlayed // ignore: cast_nullable_to_non_nullable
+              as int,
+      ScoutEntries: null == ScoutEntries
+          ? _value.ScoutEntries
+          : ScoutEntries // ignore: cast_nullable_to_non_nullable
+              as int,
+      ScoutedMatches: null == ScoutedMatches
+          ? _value.ScoutedMatches
+          : ScoutedMatches // ignore: cast_nullable_to_non_nullable
+              as int,
       MatchHistory: null == MatchHistory
           ? _value.MatchHistory
           : MatchHistory // ignore: cast_nullable_to_non_nullable
@@ -133,6 +238,21 @@ abstract class _$$TeamStatImplCopyWith<$Res>
       double Teleop,
       double Endgame,
       double Climb,
+      double? AutoFuelOPR,
+      double? TeleopFuelOPR,
+      double? TBAFuelOPR,
+      double? TBANonFuelOPR,
+      double? AverageAutoFuel,
+      double? AverageTeleopFuel,
+      double? AverageTotalFuel,
+      double? CombinedFuelOPR,
+      double? TBAOPR,
+      double DeathRate,
+      double DefenseRate,
+      int DefenseCount,
+      int MatchesPlayed,
+      int ScoutEntries,
+      int ScoutedMatches,
       List<TeamMatchHistory> MatchHistory});
 }
 
@@ -156,6 +276,21 @@ class __$$TeamStatImplCopyWithImpl<$Res>
     Object? Teleop = null,
     Object? Endgame = null,
     Object? Climb = null,
+    Object? AutoFuelOPR = freezed,
+    Object? TeleopFuelOPR = freezed,
+    Object? TBAFuelOPR = freezed,
+    Object? TBANonFuelOPR = freezed,
+    Object? AverageAutoFuel = freezed,
+    Object? AverageTeleopFuel = freezed,
+    Object? AverageTotalFuel = freezed,
+    Object? CombinedFuelOPR = freezed,
+    Object? TBAOPR = freezed,
+    Object? DeathRate = null,
+    Object? DefenseRate = null,
+    Object? DefenseCount = null,
+    Object? MatchesPlayed = null,
+    Object? ScoutEntries = null,
+    Object? ScoutedMatches = null,
     Object? MatchHistory = null,
   }) {
     return _then(_$TeamStatImpl(
@@ -187,6 +322,66 @@ class __$$TeamStatImplCopyWithImpl<$Res>
           ? _value.Climb
           : Climb // ignore: cast_nullable_to_non_nullable
               as double,
+      AutoFuelOPR: freezed == AutoFuelOPR
+          ? _value.AutoFuelOPR
+          : AutoFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TeleopFuelOPR: freezed == TeleopFuelOPR
+          ? _value.TeleopFuelOPR
+          : TeleopFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBAFuelOPR: freezed == TBAFuelOPR
+          ? _value.TBAFuelOPR
+          : TBAFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBANonFuelOPR: freezed == TBANonFuelOPR
+          ? _value.TBANonFuelOPR
+          : TBANonFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageAutoFuel: freezed == AverageAutoFuel
+          ? _value.AverageAutoFuel
+          : AverageAutoFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageTeleopFuel: freezed == AverageTeleopFuel
+          ? _value.AverageTeleopFuel
+          : AverageTeleopFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      AverageTotalFuel: freezed == AverageTotalFuel
+          ? _value.AverageTotalFuel
+          : AverageTotalFuel // ignore: cast_nullable_to_non_nullable
+              as double?,
+      CombinedFuelOPR: freezed == CombinedFuelOPR
+          ? _value.CombinedFuelOPR
+          : CombinedFuelOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      TBAOPR: freezed == TBAOPR
+          ? _value.TBAOPR
+          : TBAOPR // ignore: cast_nullable_to_non_nullable
+              as double?,
+      DeathRate: null == DeathRate
+          ? _value.DeathRate
+          : DeathRate // ignore: cast_nullable_to_non_nullable
+              as double,
+      DefenseRate: null == DefenseRate
+          ? _value.DefenseRate
+          : DefenseRate // ignore: cast_nullable_to_non_nullable
+              as double,
+      DefenseCount: null == DefenseCount
+          ? _value.DefenseCount
+          : DefenseCount // ignore: cast_nullable_to_non_nullable
+              as int,
+      MatchesPlayed: null == MatchesPlayed
+          ? _value.MatchesPlayed
+          : MatchesPlayed // ignore: cast_nullable_to_non_nullable
+              as int,
+      ScoutEntries: null == ScoutEntries
+          ? _value.ScoutEntries
+          : ScoutEntries // ignore: cast_nullable_to_non_nullable
+              as int,
+      ScoutedMatches: null == ScoutedMatches
+          ? _value.ScoutedMatches
+          : ScoutedMatches // ignore: cast_nullable_to_non_nullable
+              as int,
       MatchHistory: null == MatchHistory
           ? _value._MatchHistory
           : MatchHistory // ignore: cast_nullable_to_non_nullable
@@ -206,6 +401,21 @@ class _$TeamStatImpl extends _TeamStat {
       this.Teleop = 0.0,
       this.Endgame = 0.0,
       this.Climb = 0.0,
+      this.AutoFuelOPR,
+      this.TeleopFuelOPR,
+      this.TBAFuelOPR,
+      this.TBANonFuelOPR,
+      this.AverageAutoFuel,
+      this.AverageTeleopFuel,
+      this.AverageTotalFuel,
+      this.CombinedFuelOPR,
+      this.TBAOPR,
+      this.DeathRate = 0.0,
+      this.DefenseRate = 0.0,
+      this.DefenseCount = 0,
+      this.MatchesPlayed = 0,
+      this.ScoutEntries = 0,
+      this.ScoutedMatches = 0,
       final List<TeamMatchHistory> MatchHistory = const <TeamMatchHistory>[]})
       : _MatchHistory = MatchHistory,
         super._();
@@ -234,6 +444,42 @@ class _$TeamStatImpl extends _TeamStat {
   @override
   @JsonKey()
   final double Climb;
+  @override
+  final double? AutoFuelOPR;
+  @override
+  final double? TeleopFuelOPR;
+  @override
+  final double? TBAFuelOPR;
+  @override
+  final double? TBANonFuelOPR;
+  @override
+  final double? AverageAutoFuel;
+  @override
+  final double? AverageTeleopFuel;
+  @override
+  final double? AverageTotalFuel;
+  @override
+  final double? CombinedFuelOPR;
+  @override
+  final double? TBAOPR;
+  @override
+  @JsonKey()
+  final double DeathRate;
+  @override
+  @JsonKey()
+  final double DefenseRate;
+  @override
+  @JsonKey()
+  final int DefenseCount;
+  @override
+  @JsonKey()
+  final int MatchesPlayed;
+  @override
+  @JsonKey()
+  final int ScoutEntries;
+  @override
+  @JsonKey()
+  final int ScoutedMatches;
   final List<TeamMatchHistory> _MatchHistory;
   @override
   @JsonKey()
@@ -245,7 +491,7 @@ class _$TeamStatImpl extends _TeamStat {
 
   @override
   String toString() {
-    return 'TeamStat(Team: $Team, Rank: $Rank, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Endgame: $Endgame, Climb: $Climb, MatchHistory: $MatchHistory)';
+    return 'TeamStat(Team: $Team, Rank: $Rank, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Endgame: $Endgame, Climb: $Climb, AutoFuelOPR: $AutoFuelOPR, TeleopFuelOPR: $TeleopFuelOPR, TBAFuelOPR: $TBAFuelOPR, TBANonFuelOPR: $TBANonFuelOPR, AverageAutoFuel: $AverageAutoFuel, AverageTeleopFuel: $AverageTeleopFuel, AverageTotalFuel: $AverageTotalFuel, CombinedFuelOPR: $CombinedFuelOPR, TBAOPR: $TBAOPR, DeathRate: $DeathRate, DefenseRate: $DefenseRate, DefenseCount: $DefenseCount, MatchesPlayed: $MatchesPlayed, ScoutEntries: $ScoutEntries, ScoutedMatches: $ScoutedMatches, MatchHistory: $MatchHistory)';
   }
 
   @override
@@ -260,14 +506,67 @@ class _$TeamStatImpl extends _TeamStat {
             (identical(other.Teleop, Teleop) || other.Teleop == Teleop) &&
             (identical(other.Endgame, Endgame) || other.Endgame == Endgame) &&
             (identical(other.Climb, Climb) || other.Climb == Climb) &&
+            (identical(other.AutoFuelOPR, AutoFuelOPR) ||
+                other.AutoFuelOPR == AutoFuelOPR) &&
+            (identical(other.TeleopFuelOPR, TeleopFuelOPR) ||
+                other.TeleopFuelOPR == TeleopFuelOPR) &&
+            (identical(other.TBAFuelOPR, TBAFuelOPR) ||
+                other.TBAFuelOPR == TBAFuelOPR) &&
+            (identical(other.TBANonFuelOPR, TBANonFuelOPR) ||
+                other.TBANonFuelOPR == TBANonFuelOPR) &&
+            (identical(other.AverageAutoFuel, AverageAutoFuel) ||
+                other.AverageAutoFuel == AverageAutoFuel) &&
+            (identical(other.AverageTeleopFuel, AverageTeleopFuel) ||
+                other.AverageTeleopFuel == AverageTeleopFuel) &&
+            (identical(other.AverageTotalFuel, AverageTotalFuel) ||
+                other.AverageTotalFuel == AverageTotalFuel) &&
+            (identical(other.CombinedFuelOPR, CombinedFuelOPR) ||
+                other.CombinedFuelOPR == CombinedFuelOPR) &&
+            (identical(other.TBAOPR, TBAOPR) || other.TBAOPR == TBAOPR) &&
+            (identical(other.DeathRate, DeathRate) ||
+                other.DeathRate == DeathRate) &&
+            (identical(other.DefenseRate, DefenseRate) ||
+                other.DefenseRate == DefenseRate) &&
+            (identical(other.DefenseCount, DefenseCount) ||
+                other.DefenseCount == DefenseCount) &&
+            (identical(other.MatchesPlayed, MatchesPlayed) ||
+                other.MatchesPlayed == MatchesPlayed) &&
+            (identical(other.ScoutEntries, ScoutEntries) ||
+                other.ScoutEntries == ScoutEntries) &&
+            (identical(other.ScoutedMatches, ScoutedMatches) ||
+                other.ScoutedMatches == ScoutedMatches) &&
             const DeepCollectionEquality()
                 .equals(other._MatchHistory, _MatchHistory));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(runtimeType, Team, Rank, OPR, Auto, Teleop,
-      Endgame, Climb, const DeepCollectionEquality().hash(_MatchHistory));
+  int get hashCode => Object.hashAll([
+        runtimeType,
+        Team,
+        Rank,
+        OPR,
+        Auto,
+        Teleop,
+        Endgame,
+        Climb,
+        AutoFuelOPR,
+        TeleopFuelOPR,
+        TBAFuelOPR,
+        TBANonFuelOPR,
+        AverageAutoFuel,
+        AverageTeleopFuel,
+        AverageTotalFuel,
+        CombinedFuelOPR,
+        TBAOPR,
+        DeathRate,
+        DefenseRate,
+        DefenseCount,
+        MatchesPlayed,
+        ScoutEntries,
+        ScoutedMatches,
+        const DeepCollectionEquality().hash(_MatchHistory)
+      ]);
 
   /// Create a copy of TeamStat
   /// with the given fields replaced by the non-null parameter values.
@@ -294,6 +593,21 @@ abstract class _TeamStat extends TeamStat {
       final double Teleop,
       final double Endgame,
       final double Climb,
+      final double? AutoFuelOPR,
+      final double? TeleopFuelOPR,
+      final double? TBAFuelOPR,
+      final double? TBANonFuelOPR,
+      final double? AverageAutoFuel,
+      final double? AverageTeleopFuel,
+      final double? AverageTotalFuel,
+      final double? CombinedFuelOPR,
+      final double? TBAOPR,
+      final double DeathRate,
+      final double DefenseRate,
+      final int DefenseCount,
+      final int MatchesPlayed,
+      final int ScoutEntries,
+      final int ScoutedMatches,
       final List<TeamMatchHistory> MatchHistory}) = _$TeamStatImpl;
   const _TeamStat._() : super._();
 
@@ -314,6 +628,36 @@ abstract class _TeamStat extends TeamStat {
   double get Endgame;
   @override
   double get Climb;
+  @override
+  double? get AutoFuelOPR;
+  @override
+  double? get TeleopFuelOPR;
+  @override
+  double? get TBAFuelOPR;
+  @override
+  double? get TBANonFuelOPR;
+  @override
+  double? get AverageAutoFuel;
+  @override
+  double? get AverageTeleopFuel;
+  @override
+  double? get AverageTotalFuel;
+  @override
+  double? get CombinedFuelOPR;
+  @override
+  double? get TBAOPR;
+  @override
+  double get DeathRate;
+  @override
+  double get DefenseRate;
+  @override
+  int get DefenseCount;
+  @override
+  int get MatchesPlayed;
+  @override
+  int get ScoutEntries;
+  @override
+  int get ScoutedMatches;
   @override
   List<TeamMatchHistory> get MatchHistory;
 

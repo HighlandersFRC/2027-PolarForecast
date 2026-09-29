@@ -1,6 +1,7 @@
 import 'package:app/pages/home_page.dart';
 import 'package:app/pages/event_page.dart';
 import 'package:app/pages/group_page.dart';
+import 'package:app/pages/picklists_page.dart';
 import 'package:app/pages/team_page.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/FollowUps.dart';
@@ -52,6 +53,22 @@ class MyApp extends StatelessWidget {
           return MaterialPageRoute(
             settings: settings,
             builder: (_) => GroupPage(groupName: uri.pathSegments[1]),
+          );
+        }
+
+        if (uri.pathSegments.length == 3 &&
+            uri.pathSegments[0] == 'event' &&
+            uri.pathSegments[2] == 'picklists') {
+          final eventCode = uri.pathSegments[1];
+          return MaterialPageRoute(
+            settings: settings,
+            builder: (_) => Consumer<AuthService>(
+              builder: (_, auth, __) => PicklistsPage(
+                eventCode: eventCode,
+                groupId: auth.isLoggedIn ? auth.groupId ?? '' : '',
+                username: auth.isLoggedIn ? auth.username ?? '' : '',
+              ),
+            ),
           );
         }
 

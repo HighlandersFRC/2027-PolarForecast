@@ -395,6 +395,113 @@ class APIService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> fetchPicklists({
+    required String groupId,
+    required String event,
+    required String username,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklists',
+    ).replace(queryParameters: {'username': username});
+    final response = await _client.get(
+      uri,
+      headers: {'Accept': 'application/json'},
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load picklists: ${response.body}');
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['picklists'] is! List) return [];
+    return (decoded['picklists'] as List)
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createPicklist({
+    required String groupId,
+    required String event,
+    required String username,
+    required String name,
+    required String sortBy,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklists',
+    );
+    final response = await _client.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'username': username,
+        'name': name,
+        'sort_by': sortBy,
+      }),
+    );
+    if (response.statusCode != 201) {
+      throw Exception('Failed to create picklist: ${response.body}');
+    }
+    return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  }
+
+  Future<Map<String, dynamic>> updatePicklist({
+    required String groupId,
+    required String event,
+    required String picklistId,
+    required String username,
+    required String name,
+    required String sortBy,
+    required List<Map<String, dynamic>> teams,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklists/$picklistId',
+    );
+    final response = await _client.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'username': username,
+        'name': name,
+        'sort_by': sortBy,
+        'teams': teams,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update picklist: ${response.body}');
+    }
+    return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  }
+
+  Future<void> deletePicklist({
+    required String groupId,
+    required String event,
+    required String picklistId,
+    required String username,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/$groupId/events/$event/picklists/$picklistId',
+    ).replace(queryParameters: {'username': username});
+    final response = await _client.delete(uri);
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete picklist: ${response.body}');
+    }
+  }
+
+  Uri picklistWebSocketUri({
+    required String groupId,
+    required String event,
+    required String username,
+  }) {
+    final base = Uri.parse(baseUrl);
+    final basePath = base.path.endsWith('/')
+        ? base.path.substring(0, base.path.length - 1)
+        : base.path;
+    return base.replace(
+      scheme: base.scheme == 'https' ? 'wss' : 'ws',
+      path: '$basePath/ws/groups/$groupId/events/$event/picklists',
+      queryParameters: {'username': username},
+    );
+  }
+
   Future<List<MatchPrediction>> fetchPredictionsByEvent(String eventKey) async {
     final uri = Uri.parse('$baseUrl/$eventKey/predictions');
 

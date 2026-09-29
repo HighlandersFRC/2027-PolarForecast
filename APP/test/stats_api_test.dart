@@ -22,6 +22,18 @@ void main() {
             'Teleop': 20,
             'Endgame': 10,
             'Climb': 10,
+            'AutoFuelOPR': 6.5,
+            'TeleopFuelOPR': 18.25,
+            'AverageAutoFuel': 22.0,
+            'AverageTeleopFuel': 74.5,
+            'AverageTotalFuel': 96.5,
+            'CombinedFuelOPR': 24.75,
+            'DeathRate': 0.1,
+            'DefenseRate': 0.25,
+            'DefenseCount': 3,
+            'MatchesPlayed': 8,
+            'ScoutEntries': 12,
+            'ScoutedMatches': 7,
           };
           return http.Response(
               jsonEncode(
@@ -37,6 +49,18 @@ void main() {
           await api.fetchRawStatsByEvent('2026test', username: username);
       final team = await api.getTeamStats('2026test', 1741, username: username);
       expect(team.stats.OPR, event.single.OPR);
+      expect(event.single.AutoFuelOPR, 6.5);
+      expect(event.single.TeleopFuelOPR, 18.25);
+      expect(event.single.AverageAutoFuel, 22.0);
+      expect(event.single.AverageTeleopFuel, 74.5);
+      expect(event.single.AverageTotalFuel, 96.5);
+      expect(event.single.CombinedFuelOPR, 24.75);
+      expect(event.single.DeathRate, 0.1);
+      expect(event.single.DefenseRate, 0.25);
+      expect(event.single.DefenseCount, 3);
+      expect(event.single.MatchesPlayed, 8);
+      expect(event.single.ScoutEntries, 12);
+      expect(event.single.ScoutedMatches, 7);
       expect(requests[0].url.queryParameters, requests[1].url.queryParameters);
       expect(
           requests[1].url.queryParameters,

@@ -3,9 +3,11 @@ import binascii
 import random
 import re
 import string
+from collections import defaultdict
+from uuid import uuid4
 
 from bson import ObjectId
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import HTTPException, Response
 from pymongo import MongoClient
@@ -17,7 +19,7 @@ from time import sleep
 from models.match_scouting import MatchScouting
 from models.pit_scouting import Pitscouting
 from models.follow_ups import FollowUp
-from models.picklist import PicklistUpdate
+from models.picklist import PicklistCreate, PicklistUpdate
 from models.robot_image import RobotImageUpload
 from LinReg import linreg, linreg_TBA
 from Predictions import predict as predict_matches
@@ -127,6 +129,55 @@ cache_update_lock = Lock()
 cache_update_thread = None
 
 app = FastAPI(openapi_tags=tags_metadata)
+
+
+class PicklistConnectionManager:
+    def __init__(self):
+        self._connections: dict[tuple[str, str], set[WebSocket]] = (
+            defaultdict(set)
+        )
+
+    async def connect(
+        self,
+        group_id: str,
+        event: str,
+        websocket: WebSocket,
+    ):
+        await websocket.accept()
+        self._connections[(str(group_id), str(event))].add(websocket)
+
+    def disconnect(
+        self,
+        group_id: str,
+        event: str,
+        websocket: WebSocket,
+    ):
+        key = (str(group_id), str(event))
+        connections = self._connections.get(key)
+        if connections is None:
+            return
+        connections.discard(websocket)
+        if not connections:
+            self._connections.pop(key, None)
+
+    async def broadcast(
+        self,
+        group_id: str,
+        event: str,
+        message: dict,
+    ):
+        key = (str(group_id), str(event))
+        failed: list[WebSocket] = []
+        for websocket in tuple(self._connections.get(key, set())):
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                failed.append(websocket)
+        for websocket in failed:
+            self.disconnect(group_id, event, websocket)
+
+
+picklist_connections = PicklistConnectionManager()
 
 
 @app.middleware("http")
@@ -810,9 +861,19 @@ def ensure_database_indexes():
             ("match_key", 1),
         ]
     )
+    # Older versions allowed one picklist per group/event. Remove that exact
+    # unique index before creating the multi-picklist key.
+    for index_name, index in PicklistCollection.index_information().items():
+        keys = index.get("key", [])
+        if index.get("unique") and keys == [
+            ("group_id", 1),
+            ("event_key", 1),
+        ]:
+            PicklistCollection.drop_index(index_name)
     PicklistCollection.create_index(
-        [("group_id", 1), ("event_key", 1)],
+        [("group_id", 1), ("event_key", 1), ("picklist_id", 1)],
         unique=True,
+        sparse=True,
     )
     RobotImagesCollection.create_index(
         [("group_id", 1), ("event", 1), ("team", 1), ("created_at", -1)]
@@ -912,6 +973,389 @@ def username_is_current_group_member(
     )
 
 
+PICKLIST_SORTS = {"manual", "rank", "opr", "defense", "team"}
+
+
+def _safe_picklist_number(value, default=None):
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _picklist_team_order(
+    event: str,
+    username: str,
+    sort_by: str,
+) -> list[int]:
+    team_numbers = get_event_team_numbers(event)
+    stats_rows = get_stats_from_db(event, username) or []
+    stats_by_team = {
+        normalize_team_number(row.get("Team")): row
+        for row in stats_rows
+        if isinstance(row, dict)
+        and normalize_team_number(row.get("Team")) is not None
+    }
+
+    def sort_key(team: int):
+        stats = stats_by_team.get(team, {})
+        if sort_by == "rank":
+            rank = _safe_picklist_number(stats.get("Rank"))
+            return (rank is None or rank <= 0, rank or 0, team)
+        if sort_by == "opr":
+            opr = _safe_picklist_number(stats.get("OPR"))
+            return (opr is None, -(opr or 0), team)
+        if sort_by == "defense":
+            defense_rate = _safe_picklist_number(
+                stats.get("DefenseRate"),
+                0.0,
+            )
+            defense_count = _safe_picklist_number(
+                stats.get("DefenseCount"),
+                0.0,
+            )
+            return (-defense_rate, -defense_count, team)
+        return (team,)
+
+    return sorted(team_numbers, key=sort_key)
+
+
+def _normalize_picklist_teams(
+    teams: list[dict],
+    event: str,
+    username: str,
+    sort_by: str,
+    *,
+    reject_non_event: bool,
+) -> list[dict]:
+    ordered_event_teams = _picklist_team_order(event, username, sort_by)
+    official_teams = set(ordered_event_teams)
+    if not official_teams and reject_non_event:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The official team roster for {event} is unavailable",
+        )
+    normalized: list[dict] = []
+    seen: set[int] = set()
+
+    for item in teams:
+        team = normalize_team_number(item.get("team"))
+        if team is None or team in seen:
+            continue
+        if official_teams and team not in official_teams:
+            if reject_non_event:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Team {team} is not registered for {event}",
+                )
+            continue
+        seen.add(team)
+        normalized.append({
+            "team": team,
+            "tier": str(item.get("tier") or "")[:24],
+            "note": str(item.get("note") or "")[:500],
+        })
+
+    if official_teams:
+        by_team = {item["team"]: item for item in normalized}
+        for team in ordered_event_teams:
+            by_team.setdefault(team, {"team": team, "tier": "", "note": ""})
+
+        if sort_by != "manual":
+            normalized = [by_team[team] for team in ordered_event_teams]
+        else:
+            normalized.extend(
+                by_team[team]
+                for team in ordered_event_teams
+                if team not in seen
+            )
+
+    return normalized
+
+
+def _public_picklist(document: dict) -> dict:
+    updated_at = document.get("updated_at")
+    if isinstance(updated_at, datetime):
+        updated_at = updated_at.isoformat()
+    return {
+        "picklist_id": str(document.get("picklist_id") or ""),
+        "group_id": str(document.get("group_id") or ""),
+        "event_key": str(document.get("event_key") or ""),
+        "name": str(document.get("name") or "Main Picklist"),
+        "sort_by": str(document.get("sort_by") or "manual"),
+        "teams": document.get("teams") or [],
+        "updated_by": document.get("updated_by"),
+        "updated_at": updated_at,
+    }
+
+
+def _list_picklists(
+    group_id: str,
+    event: str,
+    username: str,
+) -> list[dict]:
+    query = {"group_id": str(group_id), "event_key": str(event)}
+    documents = list(PicklistCollection.find(query))
+    public_documents: list[dict] = []
+    roster_available = bool(get_event_team_numbers(event))
+
+    for document in documents:
+        picklist_id = str(document.get("picklist_id") or uuid4())
+        sort_by = str(document.get("sort_by") or "manual")
+        if sort_by not in PICKLIST_SORTS:
+            sort_by = "manual"
+        teams = _normalize_picklist_teams(
+            document.get("teams") or [],
+            event,
+            username,
+            sort_by,
+            reject_non_event=False,
+        )
+        normalized = {
+            **document,
+            "picklist_id": picklist_id,
+            "name": str(document.get("name") or "Main Picklist")[:80],
+            "sort_by": sort_by,
+            "teams": teams,
+        }
+        changes = {
+            key: normalized[key]
+            for key in ("picklist_id", "name", "sort_by", "teams")
+            if key != "teams" or roster_available
+            if normalized[key] != document.get(key)
+        }
+        if changes:
+            PicklistCollection.update_one(
+                {"_id": document["_id"]},
+                {"$set": changes},
+            )
+        public_documents.append(_public_picklist({
+            **normalized,
+            "teams": teams if roster_available else [],
+        }))
+
+    public_documents.sort(
+        key=lambda item: (
+            str(item.get("name") or "").casefold(),
+            item["picklist_id"],
+        )
+    )
+    return public_documents
+
+
+def _picklist_name_exists(
+    group_id: str,
+    event: str,
+    name: str,
+    *,
+    excluding_id: str | None = None,
+) -> bool:
+    normalized_name = name.strip().casefold()
+    for document in PicklistCollection.find(
+        {"group_id": str(group_id), "event_key": str(event)},
+        {"name": 1, "picklist_id": 1},
+    ):
+        if excluding_id and str(document.get("picklist_id")) == excluding_id:
+            continue
+        if str(document.get("name") or "Main Picklist").strip().casefold() == normalized_name:
+            return True
+    return False
+
+
+async def _broadcast_picklists(
+    group_id: str,
+    event: str,
+    username: str,
+):
+    await picklist_connections.broadcast(
+        group_id,
+        event,
+        {
+            "type": "picklists_snapshot",
+            "picklists": _list_picklists(group_id, event, username),
+        },
+    )
+
+
+@app.get(
+    "/groups/{group_id}/events/{event}/picklists",
+    tags=["picklists"],
+)
+def get_group_picklists(group_id: str, event: str, username: str):
+    if not username_is_current_group_member(group_id, username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+    return {"picklists": _list_picklists(group_id, event, username)}
+
+
+@app.post(
+    "/groups/{group_id}/events/{event}/picklists",
+    tags=["picklists"],
+    status_code=201,
+)
+async def create_group_picklist(
+    group_id: str,
+    event: str,
+    create: PicklistCreate,
+):
+    if not username_is_current_group_member(group_id, create.username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+    name = create.name.strip()
+    if _picklist_name_exists(group_id, event, name):
+        raise HTTPException(
+            status_code=409,
+            detail="A picklist with that name already exists",
+        )
+
+    ordered_teams = _picklist_team_order(
+        event,
+        create.username,
+        create.sort_by,
+    )
+    if not ordered_teams:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The official team roster for {event} is unavailable",
+        )
+    document = {
+        "picklist_id": str(uuid4()),
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "name": name,
+        "sort_by": create.sort_by,
+        "teams": [
+            {"team": team, "tier": "", "note": ""}
+            for team in ordered_teams
+        ],
+        "updated_by": create.username,
+        "updated_at": now_utc(),
+    }
+    PicklistCollection.insert_one(document)
+    await _broadcast_picklists(group_id, event, create.username)
+    return _public_picklist(document)
+
+
+@app.put(
+    "/groups/{group_id}/events/{event}/picklists/{picklist_id}",
+    tags=["picklists"],
+)
+async def update_group_picklist(
+    group_id: str,
+    event: str,
+    picklist_id: str,
+    update: PicklistUpdate,
+):
+    if not username_is_current_group_member(group_id, update.username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+    query = {
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "picklist_id": str(picklist_id),
+    }
+    if PicklistCollection.find_one(query, {"_id": 1}) is None:
+        raise HTTPException(status_code=404, detail="Picklist not found")
+
+    name = update.name.strip()
+    if _picklist_name_exists(
+        group_id,
+        event,
+        name,
+        excluding_id=picklist_id,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="A picklist with that name already exists",
+        )
+
+    raw_teams = [item.model_dump() for item in update.teams]
+    team_numbers = [item["team"] for item in raw_teams]
+    if len(team_numbers) != len(set(team_numbers)):
+        raise HTTPException(
+            status_code=400,
+            detail="A team can only appear once in a picklist",
+        )
+    teams = _normalize_picklist_teams(
+        raw_teams,
+        event,
+        update.username,
+        update.sort_by,
+        reject_non_event=True,
+    )
+    changes = {
+        "name": name,
+        "sort_by": update.sort_by,
+        "teams": teams,
+        "updated_by": update.username,
+        "updated_at": now_utc(),
+    }
+    PicklistCollection.update_one(query, {"$set": changes})
+    document = {**query, **changes}
+    await _broadcast_picklists(group_id, event, update.username)
+    return _public_picklist(document)
+
+
+@app.delete(
+    "/groups/{group_id}/events/{event}/picklists/{picklist_id}",
+    tags=["picklists"],
+)
+async def delete_group_picklist(
+    group_id: str,
+    event: str,
+    picklist_id: str,
+    username: str,
+):
+    if not username_is_current_group_member(group_id, username):
+        raise HTTPException(
+            status_code=403,
+            detail="User is not a current member of this group",
+        )
+    result = PicklistCollection.delete_one({
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "picklist_id": str(picklist_id),
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Picklist not found")
+    await _broadcast_picklists(group_id, event, username)
+    return {"deleted": True, "picklist_id": picklist_id}
+
+
+@app.websocket(
+    "/ws/groups/{group_id}/events/{event}/picklists",
+)
+async def picklist_websocket(
+    websocket: WebSocket,
+    group_id: str,
+    event: str,
+    username: str,
+):
+    if not username_is_current_group_member(group_id, username):
+        await websocket.close(code=4403)
+        return
+    await picklist_connections.connect(group_id, event, websocket)
+    try:
+        await websocket.send_json({
+            "type": "picklists_snapshot",
+            "picklists": _list_picklists(group_id, event, username),
+        })
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        picklist_connections.disconnect(group_id, event, websocket)
+    except Exception:
+        picklist_connections.disconnect(group_id, event, websocket)
+
+
 @app.get(
     "/groups/{group_id}/events/{event}/picklist",
     tags=["picklists"],
@@ -927,11 +1371,17 @@ def get_group_picklist(
             detail="User is not a current member of this group",
         )
 
-    document = PicklistCollection.find_one(
-        {"group_id": str(group_id), "event_key": str(event)},
-        {"_id": 0},
-    )
-    return document or {
+    picklists = _list_picklists(group_id, event, username)
+    if picklists:
+        return next(
+            (
+                item
+                for item in picklists
+                if item["name"].casefold() == "main picklist"
+            ),
+            picklists[0],
+        )
+    return {
         "group_id": str(group_id),
         "event_key": str(event),
         "teams": [],
@@ -942,7 +1392,7 @@ def get_group_picklist(
     "/groups/{group_id}/events/{event}/picklist",
     tags=["picklists"],
 )
-def put_group_picklist(
+async def put_group_picklist(
     group_id: str,
     event: str,
     update: PicklistUpdate,
@@ -953,26 +1403,57 @@ def put_group_picklist(
             detail="User is not a current member of this group",
         )
 
-    teams = [item.model_dump() for item in update.teams]
-    team_numbers = [item["team"] for item in teams]
+    raw_teams = [item.model_dump() for item in update.teams]
+    team_numbers = [item["team"] for item in raw_teams]
     if len(team_numbers) != len(set(team_numbers)):
         raise HTTPException(
             status_code=400,
             detail="A team can only appear once in a picklist",
         )
 
-    document = {
+    teams = _normalize_picklist_teams(
+        raw_teams,
+        event,
+        update.username,
+        update.sort_by,
+        reject_non_event=True,
+    )
+    existing = PicklistCollection.find_one({
         "group_id": str(group_id),
         "event_key": str(event),
+        "name": "Main Picklist",
+    }) or PicklistCollection.find_one({
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "picklist_id": {"$exists": False},
+    })
+    picklist_id = str(
+        (existing or {}).get("picklist_id") or uuid4()
+    )
+    document = {
+        "picklist_id": picklist_id,
+        "group_id": str(group_id),
+        "event_key": str(event),
+        "name": "Main Picklist",
+        "sort_by": update.sort_by,
         "teams": teams,
         "updated_by": update.username,
         "updated_at": now_utc(),
     }
     PicklistCollection.update_one(
-        {"group_id": str(group_id), "event_key": str(event)},
+        (
+            {"_id": existing["_id"]}
+            if existing is not None
+            else {
+                "group_id": str(group_id),
+                "event_key": str(event),
+                "picklist_id": picklist_id,
+            }
+        ),
         {"$set": document},
         upsert=True,
     )
+    await _broadcast_picklists(group_id, event, update.username)
 
     return {
         **document,
