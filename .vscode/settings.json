@@ -1,0 +1,7 @@
+{
+    "cmake.sourceDirectory": "C:/Users/default.LAPTOP-8TJ9M9UE/Documents/JohnPMONgl/APP/linux",
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "[freemarker]": {
+        "editor.defaultFormatter": "Bar-Tools.ftl-forge"
+    }
+}
