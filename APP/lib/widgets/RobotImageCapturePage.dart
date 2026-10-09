@@ -37,13 +37,13 @@ class _RobotImageCapturePageState extends State<RobotImageCapturePage> {
 
     try {
       final picked = await _imagePicker.pickImage(
-        source: source,
-        preferredCameraDevice: CameraDevice.rear,
-        maxWidth: 2048,
-        maxHeight: 2048,
-        imageQuality: 92,
-        requestFullMetadata: false,
-      );
+  source: source,
+  preferredCameraDevice: CameraDevice.rear,
+  maxWidth: 1280,
+  maxHeight: 1280,
+  imageQuality: 60,
+  requestFullMetadata: false,
+);
       if (picked == null) return;
 
       final bytes = await picked.readAsBytes();

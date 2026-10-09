@@ -239,6 +239,48 @@ def get_team_media(team: int, year: int = 2026):
     return {"team": team, "year": year, "media": normalized}
 
 
+@app.get('/teams/{team}/identity', tags=['stats'])
+def get_team_identity(team: int, year: int = 2026):
+    """Cache public team names and avatar logos separately from event stats."""
+    if team <= 0 or not 1992 <= year <= 2100:
+        raise HTTPException(status_code=400, detail='Invalid team or year')
+    cache_key = f'team-identity:{year}:{team}'
+    cached = ETagsCollection.find_one({'key': cache_key}, {'_id': 0}) or {}
+    identity = cached.get('identity')
+    # A date key avoids mixing naive and timezone-aware MongoDB timestamps.
+    today = now_utc().date().isoformat()
+    if identity and cached.get('identity_date') == today:
+        return identity
+
+    profile = get_tba_json(
+        f'team/frc{team}/simple', default={}, expected_type=dict, timeout=6,
+    )
+    if not profile:
+        return identity or {'team': team, 'name': '', 'avatar': None}
+    media = get_tba_json(
+        f'team/frc{team}/media/{year}', default=[], expected_type=list, timeout=6,
+    )
+    avatar = None
+    for item in media:
+        if isinstance(item, dict) and item.get('type') == 'avatar':
+            details = item.get('details') or {}
+            if isinstance(details, dict):
+                avatar = details.get('base64Image')
+            if avatar:
+                break
+    result = {
+        'team': team,
+        'name': profile.get('nickname') or profile.get('name') or '',
+        'avatar': avatar,
+    }
+    ETagsCollection.update_one(
+        {'key': cache_key},
+        {'$set': {'identity': result, 'identity_date': today}},
+        upsert=True,
+    )
+    return result
+
+
 _ROBOT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 _ROBOT_IMAGE_TYPES = {
     "image/jpeg",

@@ -23,31 +23,33 @@ class HomePage extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 1200),
               child: Column(
                 children: [
-                  _HeroSection(
-                    onExplorePressed: () {
-                      // Replace with your event-search route.
-                      // Navigator.pushNamed(context, '/events');
+                  PolarAccent(
+                    child: _HeroSection(
+                      onExplorePressed: () {
+                        // Replace with your event-search route.
+                        // Navigator.pushNamed(context, '/events');
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Connect this button to your event search page.',
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Connect this button to your event search page.',
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                    onGroupsPressed: () {
-                      // Replace with your groups route.
-                      // Navigator.pushNamed(context, '/groups');
+                        );
+                      },
+                      onGroupsPressed: () {
+                        // Replace with your groups route.
+                        // Navigator.pushNamed(context, '/groups');
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Connect this button to your groups page.',
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Connect this button to your groups page.',
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                   const SizedBox(height: 34),
                   const _TeamLookupCard(),

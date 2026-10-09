@@ -1,17 +1,20 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const background = Color(0xFF141A22);
-  static const backgroundDeep = Color(0xFF141A22);
-  static const primary = Color(0xFF8AB4E0);
-  static const secondary = Color(0xFFAEA4CC);
-  static const aqua = Color(0xFF86BDB5);
-  static const text = Color(0xFFE7EDF4);
-  static const textMuted = Color(0xFFA6B2C1);
-  static const surface = Color(0xFF1D2632);
-  static const surfaceRaised = Color(0xFF263240);
-  static const surfaceSoft = Color(0xFF222D3A);
-  static const border = Color(0xFF364353);
+  static const background = Color(0xFF070D18);
+  static const backgroundDeep = Color(0xFF03060D);
+  static const primary = Color(0xFF9BCBFF);
+  static const secondary = Color(0xFFAAC7F1);
+  static const aqua = Color(0xFF9DDDED);
+  static const text = Color(0xFFF2F6FF);
+  static const textMuted = Color(0xFFA9BBD3);
+  static const surface = Color(0xFF101F35);
+  static const surfaceRaised = Color(0xFF1A2D48);
+  static const surfaceSoft = Color(0xFF15263F);
+  static const border = Color(0xFF344F73);
+  static const glassBlue = Color(0xFF609FFF);
 }
 
 ThemeData buildMatteTheme() {
@@ -29,12 +32,16 @@ ThemeData buildMatteTheme() {
   );
 
   final rounded = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: BorderRadius.circular(24),
     side: const BorderSide(color: AppColors.border),
   );
 
   return base.copyWith(
     colorScheme: scheme,
+    textTheme: base.textTheme.apply(
+      bodyColor: AppColors.text,
+      displayColor: AppColors.text,
+    ),
     scaffoldBackgroundColor: AppColors.background,
     canvasColor: AppColors.surfaceRaised,
     dividerColor: Colors.white.withValues(alpha: 0.10),
@@ -135,7 +142,7 @@ ThemeData buildMatteTheme() {
       surfaceTintColor: Colors.transparent,
       modalBarrierColor: Colors.black.withValues(alpha: 0.50),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(34)),
         side: BorderSide(color: AppColors.border),
       ),
     ),
@@ -268,13 +275,170 @@ class MatteBackground extends StatelessWidget {
   const MatteBackground({required this.child, super.key});
 
   @override
-  Widget build(BuildContext context) => ColoredBox(
-        color: AppColors.background,
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.background, AppColors.backgroundDeep],
+          ),
+        ),
         child: child,
       );
 }
 
-/// An opaque surface with a subtle accent and no blur or glow.
+/// Quiet, non-interactive snow accents for page introductions.
+class PolarAccent extends StatelessWidget {
+  final Widget child;
+
+  const PolarAccent({required this.child, super.key});
+
+  @override
+  Widget build(BuildContext context) => Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ExcludeSemantics(
+                child: ClipRect(
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        right: -12,
+                        top: -16,
+                        child: Icon(Icons.ac_unit_rounded,
+                            size: 132,
+                            color: AppColors.primary.withValues(alpha: 0.055)),
+                      ),
+                      Positioned(
+                        right: 128,
+                        bottom: 12,
+                        child: Icon(Icons.ac_unit_rounded,
+                            size: 30,
+                            color: AppColors.aqua.withValues(alpha: 0.10)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      );
+}
+
+/// Blue-black translucent chrome inspired by the ios27-design-system tokens.
+/// Use blur for floating controls; list content can use blur: 0.
+class BlackGlassSurface extends StatelessWidget {
+  final Widget child;
+  final BorderRadius borderRadius;
+  final EdgeInsetsGeometry padding;
+  final double blur;
+  final double opacity;
+  final Color? tint;
+  final bool highlighted;
+
+  const BlackGlassSurface({
+    required this.child,
+    this.borderRadius = const BorderRadius.all(Radius.circular(34)),
+    this.padding = EdgeInsets.zero,
+    this.blur = 6,
+    this.opacity = 0.735,
+    this.tint,
+    this.highlighted = false,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final highContrast = MediaQuery.highContrastOf(context);
+    final fill = Color.alphaBlend(
+      (tint ?? Colors.transparent).withValues(alpha: tint == null ? 0 : 0.035),
+      AppColors.surface,
+    );
+    Widget surface = CustomPaint(
+      foregroundPainter:
+          _GlassRimPainter(borderRadius, highlighted || highContrast),
+      child: Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.alphaBlend(
+                      AppColors.glassBlue.withValues(alpha: 0.14), fill)
+                  .withValues(alpha: highContrast ? 1 : opacity),
+              fill.withValues(alpha: highContrast ? 1 : opacity),
+              AppColors.background.withValues(
+                  alpha: highContrast ? 1 : opacity + (1 - opacity) * 0.35),
+            ],
+          ),
+        ),
+        child: child,
+      ),
+    );
+    if (blur > 0 && !highContrast) {
+      surface = BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: surface,
+      );
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        border: Border.all(color: Colors.black.withValues(alpha: 0.75)),
+        boxShadow: [
+          if (highlighted)
+            BoxShadow(
+              color: AppColors.glassBlue.withValues(alpha: 0.16),
+              blurRadius: 18,
+            ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          )
+        ],
+      ),
+      child: ClipRRect(borderRadius: borderRadius, child: surface),
+    );
+  }
+}
+
+class _GlassRimPainter extends CustomPainter {
+  final BorderRadius radius;
+  final bool highlighted;
+
+  const _GlassRimPainter(this.radius, this.highlighted);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(0.5);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          AppColors.primary.withValues(alpha: highlighted ? 0.65 : 0.38),
+          AppColors.glassBlue.withValues(alpha: 0.14),
+          Colors.black.withValues(alpha: 0.4),
+          AppColors.primary.withValues(alpha: highlighted ? 0.35 : 0.20),
+        ],
+        stops: const [0, 0.35, 0.7, 1],
+      ).createShader(rect);
+    canvas.drawRRect(radius.toRRect(rect), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GlassRimPainter oldDelegate) =>
+      oldDelegate.radius != radius || oldDelegate.highlighted != highlighted;
+}
+
+/// A solid content surface; floating controls use BlackGlassSurface.
 class MattePanel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -297,8 +461,15 @@ class MattePanel extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         padding: padding,
         decoration: BoxDecoration(
-          color: Color.alphaBlend(
-              tint.withValues(alpha: 0.025), AppColors.surface),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.alphaBlend(
+                  tint.withValues(alpha: 0.025), AppColors.surfaceRaised),
+              AppColors.surface,
+            ],
+          ),
           borderRadius: borderRadius,
           border: Border.all(color: AppColors.border),
         ),

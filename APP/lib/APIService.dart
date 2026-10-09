@@ -263,6 +263,18 @@ class APIService {
     return images;
   }
 
+  Future<Map<String, dynamic>> fetchTeamIdentity(int team,
+      {int year = 2026}) async {
+    final uri = Uri.parse('$baseUrl/teams/$team/identity').replace(
+      queryParameters: {'year': '$year'},
+    );
+    final response =
+        await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) return const {};
+    final body = jsonDecode(response.body);
+    return body is Map ? Map<String, dynamic>.from(body) : const {};
+  }
+
   Future<String?> fetchTeamImage(int team, {int year = 2026}) async {
     final images = await fetchTeamImages(team, year: year);
     return images.isEmpty ? null : images.first['url'];

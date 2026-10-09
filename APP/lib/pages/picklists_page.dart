@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:app/APIService.dart';
 import 'package:app/models/picklist.dart';
 import 'package:app/models/team_stat.dart';
-import 'package:app/widgets/DataSourceBanner.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/matte_theme.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:palette_generator/palette_generator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class PicklistsPage extends StatefulWidget {
@@ -29,9 +30,14 @@ class PicklistsPage extends StatefulWidget {
 }
 
 class _PicklistsPageState extends State<PicklistsPage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  int? _highlightedTeam;
+  Timer? _highlightTimer;
   final APIService _api = APIService();
   final Map<String, Timer> _saveTimers = {};
   final Set<String> _savingIds = {};
+  final Map<int, Future<Map<String, dynamic>>> _teamIdentities = {};
+  final Map<int, Color> _teamColors = {};
 
   List<PicklistData> _picklists = [];
   Map<int, TeamStat> _statsByTeam = {};
@@ -97,6 +103,7 @@ class _PicklistsPageState extends State<PicklistsPage> {
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     for (final timer in _saveTimers.values) {
       timer.cancel();
     }
@@ -323,6 +330,11 @@ class _PicklistsPageState extends State<PicklistsPage> {
       final entry = picklist.teams.removeAt(index);
       picklist.teams.insert(destination, entry);
       picklist.sortBy = 'manual';
+      _highlightedTeam = entry.team;
+    });
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => _highlightedTeam = null);
     });
     _scheduleSave(picklist);
   }
@@ -433,16 +445,25 @@ class _PicklistsPageState extends State<PicklistsPage> {
     final note = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Team ${entry.team} notes'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 500,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'Strategy, compatibility, concerns…',
-          ),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Column(children: [
+          const Text('Edit Comments'),
+          const SizedBox(height: 6),
+          Text('For Team ${entry.team}',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        ]),
+        content: SizedBox(
+            width: 380,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 500,
+              minLines: 3,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                hintText: 'Add notes, strategy, or observations...',
+              ),
+            )),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -459,6 +480,111 @@ class _PicklistsPageState extends State<PicklistsPage> {
     if (note == null || !mounted) return;
     setState(() => entry.note = note);
     _scheduleSave(picklist);
+  }
+
+  Future<void> _openTeamImages(int team, int picklistPosition) async {
+    final images = _loadTeamImages(team);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+          child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720, maxHeight: 650),
+        child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                      child: Text('Team $team images',
+                          style: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.bold))),
+                  IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close)),
+                ]),
+                const SizedBox(height: 8),
+                Text('Picklist #$picklistPosition',
+                    style: const TextStyle(color: AppColors.textMuted)),
+                const SizedBox(height: 16),
+                Flexible(
+                    child: FutureBuilder<List<Map<String, String>>>(
+                  future: images,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData && !snapshot.hasError) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final media =
+                        snapshot.data ?? const <Map<String, String>>[];
+                    if (media.isEmpty)
+                      return const Center(
+                          child: Text(
+                              'No team images available for this season.'));
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: 220,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10),
+                      itemCount: media.length,
+                      itemBuilder: (context, index) {
+                        final url = media[index]['url']!;
+                        return InkWell(
+                          onTap: () => showDialog<void>(
+                              context: dialogContext,
+                              builder: (_) => Dialog(
+                                  backgroundColor: Colors.black87,
+                                  child: Stack(children: [
+                                    InteractiveViewer(
+                                        child: Center(
+                                            child: Image.network(url,
+                                                fit: BoxFit.contain,
+                                                errorBuilder: (_, __, ___) =>
+                                                    const Icon(
+                                                        Icons.broken_image)))),
+                                    Positioned(
+                                        right: 8,
+                                        top: 8,
+                                        child: IconButton(
+                                            tooltip: 'Close image',
+                                            onPressed: () =>
+                                                Navigator.pop(dialogContext),
+                                            icon: const Icon(Icons.close))),
+                                  ]))),
+                          child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.network(url,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Center(
+                                      child:
+                                          Icon(Icons.broken_image_outlined)))),
+                        );
+                      },
+                    );
+                  },
+                )),
+              ],
+            )),
+      )),
+    );
+  }
+
+  Future<List<Map<String, String>>> _loadTeamImages(int team) async {
+    final results = await Future.wait([
+      _api.fetchTeamImages(team, year: int.parse(_eventKey.substring(0, 4))),
+      _api
+          .fetchRobotImages(
+            groupId: widget.groupId,
+            event: _eventKey,
+            team: team,
+            username: widget.username,
+          )
+          .catchError((_) => <Map<String, String>>[]),
+    ]);
+    return [...results[0], ...results[1]];
   }
 
   String _escapeCsv(Object? value) {
@@ -543,15 +669,40 @@ class _PicklistsPageState extends State<PicklistsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final selected = _selected;
     return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: AppColors.backgroundDeep,
+      endDrawer: _buildPicklistDrawer(),
       appBar: PolarForecastAppBar(
-          extraText: '${_eventKey.toUpperCase()} Picklists'),
-      body: Column(
-        children: [
-          const DataSourceBanner(),
-          Expanded(child: _buildBody()),
-        ],
+          extraText:
+              'Picklist for ${_eventKey.toUpperCase()} | Picklist: ${selected?.name ?? 'None'}'),
+      floatingActionButton: _PicklistMenuButton(
+        onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
       ),
+      body: Stack(children: [
+        Padding(
+          padding:
+              EdgeInsets.all(MediaQuery.sizeOf(context).width < 700 ? 8 : 12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppColors.background, AppColors.backgroundDeep],
+                ),
+                borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: EdgeInsets.all(
+                  MediaQuery.sizeOf(context).width < 700 ? 6 : 8),
+              child: Column(children: [
+                Expanded(child: _buildBody()),
+              ]),
+            ),
+          ),
+        ),
+        const Positioned.fill(child: _PicklistSnow()),
+      ]),
     );
   }
 
@@ -575,15 +726,13 @@ class _PicklistsPageState extends State<PicklistsPage> {
     }
     final picklist = _selected;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
       child: Column(
         children: [
-          _buildToolbar(picklist),
           if (_error != null) ...[
             const SizedBox(height: 10),
             Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
           ],
-          const SizedBox(height: 14),
           Expanded(
             child: picklist == null
                 ? _PicklistEmptyState(
@@ -601,105 +750,128 @@ class _PicklistsPageState extends State<PicklistsPage> {
     );
   }
 
-  Widget _buildToolbar(PicklistData? picklist) {
-    return MattePanel(
-      padding: const EdgeInsets.all(16),
-      borderRadius: BorderRadius.circular(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 260,
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('picklist-${picklist?.id}'),
-                  initialValue: picklist?.id,
-                  decoration: const InputDecoration(
-                    labelText: 'Picklist',
-                    prefixIcon: Icon(Icons.playlist_add_check_circle_rounded),
-                  ),
-                  items: _picklists
-                      .map((item) => DropdownMenuItem(
-                            value: item.id,
-                            child: Text(item.name),
-                          ))
-                      .toList(),
-                  onChanged: (value) => setState(() => _selectedId = value),
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: _creating ? null : _createPicklist,
-                icon: const Icon(Icons.add_rounded),
-                label: Text(_creating ? 'Creating' : 'New picklist'),
-              ),
-              if (picklist != null) ...[
-                OutlinedButton.icon(
-                  onPressed: () => _renamePicklist(picklist),
-                  icon: const Icon(Icons.edit_rounded),
-                  label: const Text('Rename'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => _exportCsv(picklist),
-                  icon: const Icon(Icons.download_rounded),
-                  label: Text(_exporting ? 'Exporting' : 'Export CSV'),
-                ),
-                IconButton(
-                  tooltip: 'Delete picklist',
-                  onPressed: () => _deletePicklist(picklist),
-                  icon: const Icon(Icons.delete_outline_rounded),
-                ),
-              ],
-            ],
-          ),
-          if (picklist != null) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
+  Widget _buildPicklistDrawer() {
+    return Drawer(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: BlackGlassSurface(
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(34)),
+        blur: 40,
+        opacity: 0.9,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 230,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('sort-${picklist.id}-${picklist.sortBy}'),
-                    initialValue: picklist.sortBy,
-                    decoration: const InputDecoration(
-                      labelText: 'Sort list by',
-                      prefixIcon: Icon(Icons.sort_rounded),
-                    ),
-                    items: picklistSortLabels.entries
-                        .map((entry) => DropdownMenuItem(
-                              value: entry.key,
-                              child: Text(entry.value),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) _sortPicklist(picklist, value);
-                    },
-                  ),
-                ),
-                _ConnectionChip(connected: _socketConnected),
-                if (_savingIds.contains(picklist.id))
-                  const Row(
-                    mainAxisSize: MainAxisSize.min,
+                Row(children: [
+                  const Icon(Icons.list_rounded, color: AppColors.primary),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                      child: Text('Picklists',
+                          style: TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.w800))),
+                  IconButton(
+                      tooltip: 'Close picklists',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close)),
+                ]),
+                const SizedBox(height: 16),
+                const Divider(color: AppColors.border),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 7),
-                      Text('Saving', style: TextStyle(color: Colors.white54)),
+                      for (final item in _picklists)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            selected: item.id == _selected?.id,
+                            leading:
+                                const Icon(Icons.format_list_numbered_rounded),
+                            title: Text(item.name),
+                            subtitle: Text('${item.teams.length} teams'),
+                            trailing: item.id == _selected?.id
+                                ? PopupMenuButton<String>(
+                                    tooltip: 'Picklist actions',
+                                    onSelected: (action) {
+                                      Navigator.pop(context);
+                                      if (action == 'rename')
+                                        _renamePicklist(item);
+                                      if (action == 'export') _exportCsv(item);
+                                      if (action == 'delete')
+                                        _deletePicklist(item);
+                                      if (action.startsWith('sort:')) {
+                                        _sortPicklist(
+                                            item, action.substring(5));
+                                      }
+                                    },
+                                    itemBuilder: (_) => [
+                                      ...picklistSortLabels.entries
+                                          .where(
+                                              (entry) => entry.key != 'manual')
+                                          .map((entry) => PopupMenuItem(
+                                                value: 'sort:${entry.key}',
+                                                child: Text(
+                                                    'Sort by ${entry.value}'),
+                                              )),
+                                      const PopupMenuDivider(),
+                                      const PopupMenuItem(
+                                          value: 'rename',
+                                          child: ListTile(
+                                              leading:
+                                                  Icon(Icons.edit_outlined),
+                                              title: Text('Rename'))),
+                                      const PopupMenuItem(
+                                          value: 'export',
+                                          child: ListTile(
+                                              leading:
+                                                  Icon(Icons.download_outlined),
+                                              title: Text('Export as CSV'))),
+                                      const PopupMenuDivider(),
+                                      const PopupMenuItem(
+                                          value: 'delete',
+                                          child: ListTile(
+                                              leading: Icon(
+                                                  Icons.delete_outline,
+                                                  color: Colors.redAccent),
+                                              title: Text('Delete'))),
+                                    ],
+                                  )
+                                : null,
+                            onTap: () {
+                              setState(() => _selectedId = item.id);
+                              Navigator.pop(context);
+                            },
+                          ),
+                        ),
+                      if (_picklists.isEmpty)
+                        const Text('Create your first picklist to get started.',
+                            style: TextStyle(color: AppColors.textMuted)),
                     ],
                   ),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.text,
+                    backgroundColor:
+                        AppColors.glassBlue.withValues(alpha: 0.12),
+                    minimumSize: const Size(0, 48),
+                    shape: const StadiumBorder(),
+                  ),
+                  onPressed: _creating
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          _createPicklist();
+                        },
+                  icon: const Icon(Icons.add),
+                  label: Text(_creating ? 'Creating…' : 'New picklist'),
+                ),
               ],
             ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -713,174 +885,485 @@ class _PicklistsPageState extends State<PicklistsPage> {
       );
     }
     return ReorderableListView.builder(
+      padding: const EdgeInsets.only(bottom: 24),
       buildDefaultDragHandles: false,
       itemCount: picklist.teams.length,
-      onReorderItem: (oldIndex, newIndex) {
-        setState(() {
-          final entry = picklist.teams.removeAt(oldIndex);
-          picklist.teams.insert(newIndex, entry);
-          picklist.sortBy = 'manual';
-        });
-        _scheduleSave(picklist);
-      },
+      onReorderItem: (oldIndex, newIndex) =>
+          _moveTeam(picklist, oldIndex, newIndex - oldIndex),
       itemBuilder: (context, index) {
         final entry = picklist.teams[index];
         final stats = _statsByTeam[entry.team];
-        return Padding(
+        final highlighted = _highlightedTeam == entry.team;
+        final rank = stats?.Rank ?? 0;
+        final rankColor = switch (rank) {
+          1 => const Color(0xFFFFD781),
+          2 => const Color(0xFFD8E6F2),
+          3 => const Color(0xFFD8A47B),
+          _ => AppColors.primary,
+        };
+        final identity = _PicklistTeamIdentity(
+          team: entry.team,
+          onAvatarTap: () => _openTeamImages(entry.team, index + 1),
+          onColor: (color) {
+            if (color != null && _teamColors[entry.team] != color && mounted) {
+              setState(() => _teamColors[entry.team] = color);
+            }
+          },
+          identity: _teamIdentities.putIfAbsent(
+              entry.team,
+              () => _api.fetchTeamIdentity(entry.team,
+                  year: int.parse(_eventKey.substring(0, 4)))),
+        );
+        return AnimatedContainer(
           key: ValueKey('${picklist.id}-${entry.team}'),
-          padding: const EdgeInsets.only(bottom: 9),
-          child: MattePanel(
-            padding: const EdgeInsets.all(12),
-            borderRadius: BorderRadius.circular(14),
-            child: Row(
-              children: [
-                ReorderableDragStartListener(
-                  index: index,
-                  child: const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.drag_indicator_rounded,
-                        color: Colors.white38),
-                  ),
-                ),
-                Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4DA3FF).withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${index + 1}',
-                    style: const TextStyle(
-                      color: Color(0xFF4DA3FF),
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
+          duration: const Duration(milliseconds: 300),
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: highlighted
+                ? [
+                    BoxShadow(
+                        color: AppColors.glassBlue.withValues(alpha: 0.12),
+                        blurRadius: 16,
+                        spreadRadius: 2)
+                  ]
+                : null,
+          ),
+          child: BlackGlassSurface(
+            borderRadius: BorderRadius.circular(24),
+            blur: 0,
+            opacity: 0.9,
+            tint: _teamColors[entry.team],
+            highlighted: highlighted,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final compact = constraints.maxWidth < 700;
+              final controls = _buildMoveControls(picklist, index, compact);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      InkWell(
-                        onTap: () => Navigator.pushNamed(
-                          context,
-                          '/event/$_eventKey/${entry.team}/team',
+                      SizedBox(
+                          width: 42,
+                          child: Column(children: [
+                            Text('#${index + 1}',
+                                style: const TextStyle(
+                                    fontSize: 17, fontWeight: FontWeight.w900)),
+                            const SizedBox(height: 5),
+                            Tooltip(
+                              message: 'Competition rank',
+                              child: Column(children: [
+                                Icon(Icons.emoji_events_outlined,
+                                    size: 18, color: rankColor),
+                                Text(rank > 0 ? '#$rank' : '—',
+                                    style: TextStyle(
+                                        fontSize: 11, color: rankColor)),
+                              ]),
+                            ),
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const MouseRegion(
+                                  cursor: SystemMouseCursors.grab,
+                                  child: Padding(
+                                      padding: EdgeInsets.all(8),
+                                      child: Icon(Icons.drag_handle_rounded,
+                                          size: 22,
+                                          color: AppColors.textMuted))),
+                            ),
+                          ])),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: () => Navigator.pushNamed(context,
+                                '/event/$_eventKey/${entry.team}/team'),
+                            child: identity,
+                          ),
+                          const SizedBox(height: 6),
+                          if (stats == null)
+                            const Text('No current stats',
+                                style: TextStyle(color: AppColors.textMuted))
+                          else
+                            Wrap(spacing: 6, runSpacing: 4, children: [
+                              _StatPill(
+                                  label: 'OPR',
+                                  value: _formatStat(stats.OPR),
+                                  color: Colors.purpleAccent),
+                              _StatPill(
+                                  label: 'Auto',
+                                  value: _formatStat(stats.Auto),
+                                  color: Colors.greenAccent),
+                              _StatPill(
+                                  label: 'Teleop',
+                                  value: _formatStat(stats.Teleop),
+                                  color: Colors.orangeAccent),
+                              if (!compact)
+                                _StatPill(
+                                    label: 'Endgame',
+                                    value: _formatStat(stats.Endgame),
+                                    color: const Color(0xFFFFD781)),
+                              if (!compact)
+                                _StatPill(
+                                    label: 'Death',
+                                    value: _formatStat(stats.DeathRate,
+                                        percent: true),
+                                    color: Colors.redAccent),
+                              if (!compact)
+                                _StatPill(
+                                    label: 'Def',
+                                    value: _formatStat(stats.DefenseRate,
+                                        percent: true),
+                                    color: Colors.brown.shade200),
+                            ]),
+                        ],
+                      )),
+                      if (!compact) ...[
+                        const SizedBox(width: 16),
+                        controls,
+                      ],
+                      PopupMenuButton<String>(
+                        tooltip: 'Set team tier',
+                        onSelected: (value) {
+                          setState(() => entry.tier = value);
+                          _scheduleSave(picklist);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: '', child: Text('No tier')),
+                          PopupMenuItem(value: 'A', child: Text('A tier')),
+                          PopupMenuItem(value: 'B', child: Text('B tier')),
+                          PopupMenuItem(value: 'C', child: Text('C tier')),
+                          PopupMenuItem(
+                              value: 'Do not pick', child: Text('Do not pick')),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: AppColors.border.withValues(alpha: 0.35)),
                         ),
                         child: Text(
-                          'Team ${entry.team}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                            entry.note.isEmpty ? 'No comments.' : entry.note,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.text.withValues(alpha: 0.85),
+                                fontStyle: entry.note.isEmpty
+                                    ? FontStyle.normal
+                                    : FontStyle.italic)),
                       ),
-                      const SizedBox(height: 7),
-                      if (stats == null)
-                        const Text('No current stats',
-                            style: TextStyle(color: Colors.white54))
-                      else
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _StatPill(
-                                label: 'Rank',
-                                value: stats.Rank > 0 ? '${stats.Rank}' : '—'),
-                            _StatPill(
-                                label: 'OPR', value: _formatStat(stats.OPR)),
-                            _StatPill(
-                                label: 'Defense',
-                                value: _formatStat(stats.DefenseRate,
-                                    percent: true)),
-                            _StatPill(
-                                label: 'Auto Fuel',
-                                value: _formatStat(stats.AverageAutoFuel)),
-                            _StatPill(
-                                label: 'Teleop Fuel',
-                                value: _formatStat(stats.AverageTeleopFuel)),
-                            _StatPill(
-                                label: 'Auto', value: _formatStat(stats.Auto)),
-                            _StatPill(
-                                label: 'Teleop',
-                                value: _formatStat(stats.Teleop)),
-                            _StatPill(
-                                label: 'Endgame',
-                                value: _formatStat(stats.Endgame)),
-                          ],
-                        ),
-                      if (entry.tier.isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(
+                    ),
+                    IconButton(
+                      tooltip: 'Edit comments',
+                      onPressed: () => _editNote(picklist, entry),
+                      icon: const Icon(Icons.edit_rounded, size: 18),
+                    ),
+                  ]),
+                  if (entry.tier.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
                           entry.tier == 'Do not pick'
                               ? entry.tier
                               : '${entry.tier} tier',
                           style: TextStyle(
-                            color: entry.tier == 'Do not pick'
-                                ? Colors.redAccent
-                                : const Color(0xFF4DA3FF),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                      if (entry.note.isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(entry.note,
-                            style: const TextStyle(color: Colors.white70)),
-                      ],
-                    ],
-                  ),
-                ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Move team up',
-                      onPressed: index == 0
-                          ? null
-                          : () => _moveTeam(picklist, index, -1),
-                      icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                              fontWeight: FontWeight.w700,
+                              color: entry.tier == 'Do not pick'
+                                  ? const Color(0xFFFFA4B1)
+                                  : AppColors.aqua)),
                     ),
-                    IconButton(
-                      tooltip: 'Move team down',
-                      onPressed: index == picklist.teams.length - 1
-                          ? null
-                          : () => _moveTeam(picklist, index, 1),
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    ),
+                  if (compact) ...[
+                    const SizedBox(height: 8),
+                    Align(alignment: Alignment.centerRight, child: controls),
                   ],
-                ),
-                PopupMenuButton<String>(
-                  tooltip: 'Team options',
-                  onSelected: (value) {
-                    if (value == 'note') {
-                      _editNote(picklist, entry);
-                    } else {
-                      setState(() => entry.tier = value);
-                      _scheduleSave(picklist);
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: '', child: Text('No tier')),
-                    PopupMenuItem(value: 'A', child: Text('A tier')),
-                    PopupMenuItem(value: 'B', child: Text('B tier')),
-                    PopupMenuItem(value: 'C', child: Text('C tier')),
-                    PopupMenuItem(
-                        value: 'Do not pick', child: Text('Do not pick')),
-                    PopupMenuDivider(),
-                    PopupMenuItem(value: 'note', child: Text('Edit notes')),
-                  ],
-                ),
-              ],
-            ),
+                ],
+              );
+            }),
           ),
         );
       },
     );
   }
+
+  Widget _buildMoveControls(PicklistData picklist, int index, bool compact) {
+    final first = index == 0;
+    final last = index == picklist.teams.length - 1;
+    final up = _moveButton(Icons.keyboard_arrow_up_rounded, 'Move up 1',
+        first ? null : () => _moveTeam(picklist, index, -1));
+    final down = _moveButton(Icons.keyboard_arrow_down_rounded, 'Move down 1',
+        last ? null : () => _moveTeam(picklist, index, 1));
+    final top = _moveButton(Icons.vertical_align_top_rounded, 'Move to top',
+        first ? null : () => _moveTeam(picklist, index, -index),
+        color: Colors.greenAccent);
+    final bottom = _moveButton(
+        Icons.vertical_align_bottom_rounded,
+        'Move to bottom',
+        last
+            ? null
+            : () =>
+                _moveTeam(picklist, index, picklist.teams.length - 1 - index),
+        color: Colors.orangeAccent);
+    if (compact) {
+      return Row(children: [
+        Expanded(child: up),
+        const SizedBox(width: 6),
+        Expanded(child: down),
+        const SizedBox(width: 6),
+        Expanded(child: top),
+        const SizedBox(width: 6),
+        Expanded(child: bottom),
+      ]);
+    }
+    return SizedBox(
+        width: 92,
+        child: Column(children: [
+          Row(children: [
+            Expanded(child: up),
+            const SizedBox(width: 4),
+            Expanded(child: down)
+          ]),
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(child: top),
+            const SizedBox(width: 4),
+            Expanded(child: bottom)
+          ]),
+        ]));
+  }
+
+  Widget _moveButton(IconData icon, String tooltip, VoidCallback? onPressed,
+      {Color color = AppColors.text}) {
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 200),
+      opacity: onPressed == null ? 0.3 : 1,
+      child: Tooltip(
+        message: tooltip,
+        child: BlackGlassSurface(
+          borderRadius: BorderRadius.circular(100),
+          blur: 3.6,
+          opacity: 0.75,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPressed,
+              child: SizedBox(
+                height: 44,
+                child: Center(
+                  child: Icon(icon, color: color, size: 20),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PicklistMenuButton extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _PicklistMenuButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: 'Open Picklist Panel',
+        child: BlackGlassSurface(
+          borderRadius: BorderRadius.circular(100),
+          blur: 3.6,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+                onTap: onPressed,
+                child: const SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: Icon(Icons.menu_rounded, color: AppColors.text),
+                )),
+          ),
+        ),
+      );
+}
+
+class _PicklistSnow extends StatefulWidget {
+  const _PicklistSnow();
+
+  @override
+  State<_PicklistSnow> createState() => _PicklistSnowState();
+}
+
+class _PicklistSnowState extends State<_PicklistSnow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 40),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
+      _animation.stop();
+    } else {
+      _animation.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: ExcludeSemantics(
+            child: RepaintBoundary(
+          child: CustomPaint(painter: _PicklistSnowPainter(_animation)),
+        )),
+      );
+}
+
+class _PicklistSnowPainter extends CustomPainter {
+  final Animation<double> animation;
+
+  _PicklistSnowPainter(this.animation) : super(repaint: animation);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final random = math.Random(26);
+    final paint = Paint();
+    for (var i = 0; i < 100; i++) {
+      final x = random.nextDouble();
+      final y = random.nextDouble();
+      final speed = 1 + random.nextInt(3);
+      final radius = 0.8 + random.nextDouble() * 1.8;
+      final drift = math.sin((animation.value + x) * math.pi * 2) * 18;
+      paint.color = AppColors.primary
+          .withValues(alpha: 0.10 + random.nextDouble() * 0.22);
+      canvas.drawCircle(
+          Offset(
+            x * size.width + drift,
+            ((y + animation.value * speed) % 1) * (size.height + 8) - 4,
+          ),
+          radius,
+          paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PicklistSnowPainter oldDelegate) =>
+      oldDelegate.animation != animation;
+}
+
+class _PicklistTeamIdentity extends StatefulWidget {
+  final int team;
+  final Future<Map<String, dynamic>> identity;
+  final VoidCallback onAvatarTap;
+  final ValueChanged<Color?> onColor;
+
+  const _PicklistTeamIdentity({
+    required this.team,
+    required this.identity,
+    required this.onAvatarTap,
+    required this.onColor,
+  });
+
+  @override
+  State<_PicklistTeamIdentity> createState() => _PicklistTeamIdentityState();
+}
+
+class _PicklistTeamIdentityState extends State<_PicklistTeamIdentity> {
+  bool _paletteRequested = false;
+
+  Future<void> _readPalette(Uint8List image) async {
+    try {
+      final palette = await PaletteGenerator.fromImageProvider(
+        MemoryImage(image),
+        size: const Size(40, 40),
+        maximumColorCount: 4,
+      );
+      if (mounted) {
+        widget.onColor(
+            palette.dominantColor?.color ?? palette.vibrantColor?.color);
+      }
+    } catch (_) {
+      // A logo is optional; the team number and name remain available.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
+        future: widget.identity,
+        builder: (context, snapshot) {
+          final name = snapshot.data?['name']?.toString().trim() ?? '';
+          Uint8List? avatar;
+          try {
+            final encoded = snapshot.data?['avatar'];
+            if (encoded is String && encoded.isNotEmpty) {
+              avatar = base64Decode(encoded);
+            }
+          } on FormatException {
+            // Ignore malformed avatar data.
+          }
+          if (avatar != null && !_paletteRequested) {
+            _paletteRequested = true;
+            _readPalette(avatar);
+          }
+          const fallback = Icon(Icons.smart_toy_outlined,
+              color: AppColors.textMuted, size: 25);
+          return Row(children: [
+            InkWell(
+              onTap: widget.onAvatarTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Tooltip(
+                message: 'View team images',
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceRaised,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: avatar == null
+                      ? fallback
+                      : Image.memory(avatar,
+                          fit: BoxFit.contain,
+                          semanticLabel: 'Team ${widget.team} logo',
+                          errorBuilder: (_, __, ___) => fallback),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(
+              name.isEmpty ? '${widget.team}' : '${widget.team} | $name',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text),
+            )),
+          ]);
+        },
+      );
 }
 
 class _CreatePicklistRequest {
@@ -910,22 +1393,36 @@ class _CreatePicklistDialogState extends State<_CreatePicklistDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Create picklist'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+      title: const Row(children: [
+        Icon(Icons.add_chart_rounded, color: AppColors.primary),
+        SizedBox(width: 12),
+        Text('Create Picklist'),
+      ]),
       content: SizedBox(
         width: 380,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const Text('Set up the details for your new picklist.',
+                style: TextStyle(color: AppColors.textMuted)),
+            const SizedBox(height: 20),
             TextField(
               controller: _controller,
               autofocus: true,
               maxLength: 80,
-              decoration: const InputDecoration(labelText: 'Picklist name'),
+              decoration: const InputDecoration(
+                  labelText: 'Picklist Name',
+                  prefixIcon: Icon(Icons.edit_note)),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: _sortBy,
-              decoration: const InputDecoration(labelText: 'Initial sort'),
+              decoration: const InputDecoration(
+                  labelText: 'Initial Sort Metric',
+                  prefixIcon: Icon(Icons.sort_rounded)),
               items: picklistSortLabels.entries
                   .where((entry) => entry.key != 'manual')
                   .map((entry) => DropdownMenuItem(
@@ -960,58 +1457,31 @@ class _CreatePicklistDialogState extends State<_CreatePicklistDialog> {
 class _StatPill extends StatelessWidget {
   final String label;
   final String value;
+  final Color color;
 
-  const _StatPill({required this.label, required this.value});
+  const _StatPill(
+      {required this.label,
+      required this.value,
+      this.color = AppColors.primary});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.045),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
       ),
       child: Text.rich(
         TextSpan(children: [
-          TextSpan(
-              text: '$label ', style: const TextStyle(color: Colors.white38)),
+          TextSpan(text: '$label: ', style: TextStyle(color: color)),
           TextSpan(
             text: value,
-            style: const TextStyle(
-                color: Colors.white70, fontWeight: FontWeight.w700),
+            style: TextStyle(color: color, fontWeight: FontWeight.w700),
           ),
         ]),
-        style: const TextStyle(fontSize: 11),
-      ),
-    );
-  }
-}
-
-class _ConnectionChip extends StatelessWidget {
-  final bool connected;
-
-  const _ConnectionChip({required this.connected});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = connected ? Colors.greenAccent : Colors.orangeAccent;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(connected ? Icons.sync_rounded : Icons.sync_problem_rounded,
-              color: color, size: 16),
-          const SizedBox(width: 6),
-          Text(connected ? 'Live sync' : 'Reconnecting',
-              style: TextStyle(color: color, fontWeight: FontWeight.w700)),
-        ],
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
   }

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -38,21 +37,12 @@ class EventPage extends StatefulWidget {
 }
 
 class _EventPageState extends State<EventPage> {
-  static const Duration _cachePollInterval = Duration(seconds: 30);
-
   final APIService _apiService = APIService();
 
   late LiveDataController<EventData> _eventData;
   late final String _apiEventKey;
 
-  Timer? _cacheTimer;
-
-  Map<String, dynamic>? _cacheStatus;
-  Object? _cacheStatusError;
-
   int _selectedIndex = 0;
-  bool _cacheStatusLoading = true;
-  bool _checkingCache = false;
   bool _isRefreshing = false;
   bool _authStateInitialized = false;
 
@@ -67,12 +57,6 @@ class _EventPageState extends State<EventPage> {
     _apiEventKey = _eventKeyForApi(widget.eventCode);
 
     _loadEventName();
-    _pollCacheStatus();
-
-    _cacheTimer = Timer.periodic(
-      _cachePollInterval,
-      (_) => _pollCacheStatus(),
-    );
   }
 
   @override
@@ -132,7 +116,6 @@ class _EventPageState extends State<EventPage> {
 
   @override
   void dispose() {
-    _cacheTimer?.cancel();
     _eventData.dispose();
     _apiService.dispose();
     super.dispose();
@@ -175,58 +158,17 @@ class _EventPageState extends State<EventPage> {
     }
   }
 
-  Future<void> _pollCacheStatus() async {
-    if (_checkingCache) {
-      return;
-    }
-
-    _checkingCache = true;
-
-    try {
-      final status = await _apiService.fetchCacheStatus(
-        year: _apiEventKey.substring(0, 4),
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _cacheStatus = status;
-        _cacheStatusError = null;
-        _cacheStatusLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _cacheStatusError = error;
-        _cacheStatusLoading = false;
-      });
-    } finally {
-      _checkingCache = false;
-    }
-  }
-
   Future<void> _refreshPage() async {
     if (_isRefreshing) {
       return;
     }
 
-    final refreshedEvent = _eventData.refresh();
-
     setState(() {
       _isRefreshing = true;
-      _cacheStatusLoading = _cacheStatus == null;
     });
 
     try {
-      await Future.wait([
-        refreshedEvent,
-        _pollCacheStatus(),
-      ]);
+      await _eventData.refresh();
     } finally {
       if (mounted) {
         setState(() {
@@ -241,19 +183,12 @@ class _EventPageState extends State<EventPage> {
     final screenWidth = MediaQuery.sizeOf(context).width;
 
     final isWideLayout = screenWidth >= 1050;
-    final showInlineCacheStatus = screenWidth >= 720;
 
     return Scaffold(
       backgroundColor: _pageBackground,
       appBar: PolarForecastAppBar(
         extraText: _displayEvent,
       ),
-
-      // Mobile gets a small button on the right instead of the large card.
-      floatingActionButton:
-          showInlineCacheStatus ? null : _buildMobileCacheButton(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-
       bottomNavigationBar: isWideLayout ? null : _buildBottomNavigation(),
       body: isWideLayout
           ? Row(
@@ -265,38 +200,18 @@ class _EventPageState extends State<EventPage> {
                   color: _borderColor,
                 ),
                 Expanded(
-                  child: _buildPageContent(
-                    showCacheCard: true,
-                  ),
+                  child: _buildPageContent(),
                 ),
               ],
             )
-          : _buildPageContent(
-              showCacheCard: showInlineCacheStatus,
-            ),
+          : _buildPageContent(),
     );
   }
 
-  Widget _buildPageContent({
-    required bool showCacheCard,
-  }) {
+  Widget _buildPageContent() {
     return Column(
       children: [
         const DataSourceBanner(),
-        if (showCacheCard) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: _CacheStatusCard(
-              eventKey: _apiEventKey,
-              status: _cacheStatus,
-              error: _cacheStatusError,
-              isLoading: _cacheStatusLoading,
-              isRefreshing: _isRefreshing,
-              onRefresh: _refreshPage,
-            ),
-          ),
-          const SizedBox(height: 2),
-        ],
         Expanded(
           child: ValueListenableBuilder<AsyncSnapshot<EventData>>(
             valueListenable: _eventData,
@@ -338,113 +253,6 @@ class _EventPageState extends State<EventPage> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildMobileCacheButton() {
-    final statusName =
-        (_cacheStatus?['status']?.toString() ?? 'not_started').toLowerCase();
-
-    final presentation = _cacheStatusPresentation(
-      statusName,
-      hasError: _cacheStatusError != null,
-    );
-
-    return FloatingActionButton.small(
-      heroTag: 'mobile-cache-status',
-      tooltip: 'View cache update status',
-      onPressed: _showMobileCacheStatus,
-      backgroundColor: _surfaceColorLight,
-      foregroundColor: presentation.color,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          color: presentation.color.withOpacity(0.35),
-        ),
-      ),
-      child: _cacheStatusLoading
-          ? SizedBox(
-              width: 19,
-              height: 19,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: presentation.color,
-              ),
-            )
-          : Icon(
-              presentation.icon,
-              size: 22,
-            ),
-    );
-  }
-
-  Future<void> _showMobileCacheStatus() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.68),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> refreshFromSheet() async {
-              // _refreshPage changes the parent state synchronously before
-              // reaching its first await.
-              final refreshFuture = _refreshPage();
-
-              setSheetState(() {});
-
-              await refreshFuture;
-
-              if (sheetContext.mounted) {
-                setSheetState(() {});
-              }
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.82,
-                  ),
-                  child: MattePanel(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24),
-                      bottom: Radius.circular(18),
-                    ),
-                    tint: AppColors.secondary,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: Colors.white24,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _CacheStatusCard(
-                            eventKey: _apiEventKey,
-                            status: _cacheStatus,
-                            error: _cacheStatusError,
-                            isLoading: _cacheStatusLoading,
-                            isRefreshing: _isRefreshing,
-                            onRefresh: refreshFromSheet,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
     );
   }
 
@@ -820,310 +628,6 @@ class _EventPageState extends State<EventPage> {
   }
 }
 
-class _CacheStatusCard extends StatelessWidget {
-  final String eventKey;
-  final Map<String, dynamic>? status;
-  final Object? error;
-  final bool isLoading;
-  final bool isRefreshing;
-  final VoidCallback onRefresh;
-
-  const _CacheStatusCard({
-    required this.eventKey,
-    required this.status,
-    required this.error,
-    required this.isLoading,
-    required this.isRefreshing,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final statusName =
-        (status?['status']?.toString() ?? 'not_started').toLowerCase();
-
-    final statusPresentation = _cacheStatusPresentation(
-      statusName,
-      hasError: error != null,
-    );
-
-    final lastUpdated = _readCacheDate(
-      status,
-      valueKey: 'last_completed_at',
-      displayKey: 'last_completed_at_display',
-      fallbackValueKey: 'updated_at',
-    );
-
-    final nextUpdate = _readCacheDate(
-      status,
-      valueKey: 'next_update_at',
-      displayKey: 'next_update_at_display',
-    );
-
-    return MattePanel(
-      padding: const EdgeInsets.all(16),
-      borderRadius: BorderRadius.circular(18),
-      tint: statusPresentation.color,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 720;
-
-          final heading = Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: statusPresentation.color.withOpacity(0.13),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: isLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(11),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        statusPresentation.icon,
-                        color: statusPresentation.color,
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Flexible(
-                          child: Text(
-                            'Backend cache',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _StatusPill(
-                          label: statusPresentation.label,
-                          color: statusPresentation.color,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      error != null
-                          ? 'The cache status endpoint could not be reached.'
-                          : '${eventKey.toUpperCase()} stats refresh every 30 seconds and when you return to the app.',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12.5,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-
-          final dateTiles = Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _CacheDateTile(
-                icon: Icons.history_rounded,
-                label: 'Last updated',
-                value: lastUpdated,
-                width: compact ? constraints.maxWidth : 220,
-              ),
-              _CacheDateTile(
-                icon: Icons.schedule_rounded,
-                label: 'Next update',
-                value: nextUpdate,
-                width: compact ? constraints.maxWidth : 220,
-              ),
-            ],
-          );
-
-          final refreshButton = FilledButton.icon(
-            onPressed: isRefreshing ? null : onRefresh,
-            icon: isRefreshing
-                ? const SizedBox(
-                    width: 17,
-                    height: 17,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh_rounded),
-            label: Text(isRefreshing ? 'Refreshing' : 'Refresh now'),
-            style: FilledButton.styleFrom(
-              backgroundColor: _accentColor,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: _surfaceColorLight,
-              disabledForegroundColor: Colors.white54,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(11),
-              ),
-            ),
-          );
-
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                heading,
-                const SizedBox(height: 14),
-                dateTiles,
-                if (error != null) ...[
-                  const SizedBox(height: 10),
-                  _CacheErrorText(error: error!),
-                ],
-                const SizedBox(height: 12),
-                refreshButton,
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              Expanded(flex: 3, child: heading),
-              const SizedBox(width: 18),
-              Expanded(flex: 4, child: dateTiles),
-              const SizedBox(width: 14),
-              refreshButton,
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _CacheDateTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final double width;
-
-  const _CacheDateTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.width,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-        decoration: BoxDecoration(
-          color: _surfaceColorLight,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.05),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: Colors.white54, size: 19),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _StatusPill({
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 4,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.13),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.34)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _CacheErrorText extends StatelessWidget {
-  final Object error;
-
-  const _CacheErrorText({required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      error.toString(),
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: Colors.red.shade300,
-        fontSize: 12,
-      ),
-    );
-  }
-}
-
 class _PageLoadingState extends StatelessWidget {
   const _PageLoadingState();
 
@@ -1143,101 +647,6 @@ class _PageLoadingState extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CacheStatusPresentation {
-  final String label;
-  final IconData icon;
-  final Color color;
-
-  const _CacheStatusPresentation({
-    required this.label,
-    required this.icon,
-    required this.color,
-  });
-}
-
-_CacheStatusPresentation _cacheStatusPresentation(
-  String status, {
-  required bool hasError,
-}) {
-  if (hasError || status == 'error') {
-    return const _CacheStatusPresentation(
-      label: 'Error',
-      icon: Icons.error_outline_rounded,
-      color: Color(0xFFFF6B6B),
-    );
-  }
-
-  switch (status) {
-    case 'running':
-      return const _CacheStatusPresentation(
-        label: 'Updating',
-        icon: Icons.sync_rounded,
-        color: Color(0xFFFFC857),
-      );
-    case 'done':
-      return const _CacheStatusPresentation(
-        label: 'Up to date',
-        icon: Icons.cloud_done_rounded,
-        color: Color(0xFF63D69B),
-      );
-    default:
-      return const _CacheStatusPresentation(
-        label: 'Waiting',
-        icon: Icons.hourglass_empty_rounded,
-        color: Colors.white54,
-      );
-  }
-}
-
-String _readCacheDate(
-  Map<String, dynamic>? status, {
-  required String valueKey,
-  required String displayKey,
-  String? fallbackValueKey,
-}) {
-  final rawValue = status?[valueKey] ??
-      (fallbackValueKey == null ? null : status?[fallbackValueKey]);
-
-  if (rawValue != null) {
-    final parsed = DateTime.tryParse(rawValue.toString());
-
-    if (parsed != null) {
-      return _formatLocalDateTime(parsed.toLocal());
-    }
-  }
-
-  final displayValue = status?[displayKey]?.toString();
-  if (displayValue != null && displayValue.trim().isNotEmpty) {
-    return displayValue;
-  }
-
-  return 'Not available';
-}
-
-String _formatLocalDateTime(DateTime value) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-
-  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
-  final minute = value.minute.toString().padLeft(2, '0');
-  final period = value.hour >= 12 ? 'PM' : 'AM';
-
-  return '${months[value.month - 1]} ${value.day}, ${value.year} '
-      '• $hour:$minute $period';
 }
 
 String _eventKeyForApi(String eventCode) {
@@ -1630,8 +1039,6 @@ class _StatsViewState extends State<_StatsView> {
                   child: Column(
                     children: [
                       _buildToolbar(visibleStats),
-                      const SizedBox(height: 14),
-                      _buildSummary(visibleStats),
                     ],
                   ),
                 ),
@@ -1639,8 +1046,6 @@ class _StatsViewState extends State<_StatsView> {
             ],
           ] else ...[
             _buildToolbar(visibleStats),
-            const SizedBox(height: 14),
-            _buildSummary(visibleStats),
           ],
           const SizedBox(height: 14),
           Expanded(
@@ -1671,35 +1076,44 @@ class _StatsViewState extends State<_StatsView> {
           ),
         ],
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final title = _buildTitle(visibleStats);
-          final actions = _buildActions();
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final title = _buildTitle(visibleStats);
+              final actions = _buildActions();
 
-          if (constraints.maxWidth < 780) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                title,
-                const SizedBox(height: 16),
-                actions,
-              ],
-            );
-          }
+              if (constraints.maxWidth < 780) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    title,
+                    const SizedBox(height: 16),
+                    actions,
+                  ],
+                );
+              }
 
-          return Row(
-            children: [
-              Expanded(child: title),
-              const SizedBox(width: 24),
-              Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 530),
-                  child: actions,
-                ),
-              ),
-            ],
-          );
-        },
+              return Row(
+                children: [
+                  Expanded(child: title),
+                  const SizedBox(width: 24),
+                  Flexible(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 530),
+                      child: actions,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          const Divider(height: 1, color: _borderColor),
+          const SizedBox(height: 16),
+          _buildSummary(visibleStats),
+        ],
       ),
     );
   }
@@ -1893,8 +1307,8 @@ class _StatsViewState extends State<_StatsView> {
   Widget _buildSummary(List<TeamStat> stats) {
     final sourceStats = stats.isEmpty ? widget.stats : stats;
 
-    final cards = [
-      _summaryCard(
+    final metrics = [
+      _summaryMetric(
         icon: Icons.groups_2_rounded,
         label: _searchQuery.isEmpty ? 'Teams' : 'Teams shown',
         value: sourceStats.length.toString(),
@@ -1902,19 +1316,19 @@ class _StatsViewState extends State<_StatsView> {
             ? 'At this event'
             : '${widget.stats.length} total',
       ),
-      _summaryCard(
+      _summaryMetric(
         icon: Icons.analytics_rounded,
         label: 'Average OPR',
         value: _average(sourceStats, 'opr').toStringAsFixed(1),
         helper: 'Overall output',
       ),
-      _summaryCard(
+      _summaryMetric(
         icon: Icons.bolt_rounded,
         label: 'Average Auto',
         value: _average(sourceStats, 'auto').toStringAsFixed(1),
         helper: 'Autonomous period',
       ),
-      _summaryCard(
+      _summaryMetric(
         icon: Icons.sports_esports_rounded,
         label: 'Average Teleop',
         value: _average(sourceStats, 'teleop').toStringAsFixed(1),
@@ -1930,7 +1344,7 @@ class _StatsViewState extends State<_StatsView> {
           return Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: cards
+            children: metrics
                 .map(
                   (card) => SizedBox(
                     width: width,
@@ -1943,9 +1357,13 @@ class _StatsViewState extends State<_StatsView> {
 
         return Row(
           children: [
-            for (var index = 0; index < cards.length; index++) ...[
-              Expanded(child: cards[index]),
-              if (index != cards.length - 1) const SizedBox(width: 12),
+            for (var index = 0; index < metrics.length; index++) ...[
+              Expanded(child: metrics[index]),
+              if (index != metrics.length - 1)
+                const VerticalDivider(
+                  width: 25,
+                  color: _borderColor,
+                ),
             ],
           ],
         );
@@ -1953,22 +1371,15 @@ class _StatsViewState extends State<_StatsView> {
     );
   }
 
-  Widget _summaryCard({
+  Widget _summaryMetric({
     required IconData icon,
     required String label,
     required String value,
     required String helper,
   }) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 90),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.065),
-        ),
-      ),
+      constraints: const BoxConstraints(minHeight: 70),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Row(
         children: [
           Container(
