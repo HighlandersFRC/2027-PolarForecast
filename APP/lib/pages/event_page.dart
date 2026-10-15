@@ -13,6 +13,7 @@ import 'package:app/widgets/PitScouting.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/DataSourceBanner.dart';
 import 'package:app/widgets/matte_theme.dart';
+import 'package:app/widgets/event_stats_grid.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -219,7 +220,10 @@ class _EventPageState extends State<EventPage> {
               // Event stats refresh independently of the active scouting form.
               // Replacing it with loading/error UI would dispose its draft.
               if (_selectedIndex == 5) {
-                return const MatchScouting();
+                return MatchScouting(
+                  event: _apiEventKey,
+                  onSubmitted: _onScoutingSubmitted,
+                );
               }
 
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -262,6 +266,7 @@ class _EventPageState extends State<EventPage> {
         return _StatsView(
           eventCode: widget.eventCode,
           stats: data.stats,
+          showScoutingAnalysis: _statsUsername != null,
         );
       case 1:
         return _PredictionsView(
@@ -619,12 +624,19 @@ class _EventPageState extends State<EventPage> {
     );
   }
 
+  void _onScoutingSubmitted() {
+    // A request started before the save may still contain public/older stats.
+    _eventData.refresh(replace: true);
+  }
+
   void _selectEventSection(int index) {
     if (index == 4) {
       Navigator.pushNamed(context, '/event/$_apiEventKey/picklists');
       return;
     }
+    final returningToStats = index == 0 && _selectedIndex != 0;
     setState(() => _selectedIndex = index);
+    if (returningToStats) _eventData.refresh();
   }
 }
 
@@ -662,10 +674,12 @@ String _eventKeyForApi(String eventCode) {
 class _StatsView extends StatefulWidget {
   final String eventCode;
   final List<TeamStat> stats;
+  final bool showScoutingAnalysis;
 
   const _StatsView({
     required this.eventCode,
     required this.stats,
+    required this.showScoutingAnalysis,
   });
 
   @override
@@ -673,8 +687,6 @@ class _StatsView extends StatefulWidget {
 }
 
 class _StatsViewState extends State<_StatsView> {
-  final ScrollController _verticalScrollController = ScrollController();
-  final ScrollController _horizontalScrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
   String _sortKey = 'rank';
@@ -682,12 +694,9 @@ class _StatsViewState extends State<_StatsView> {
 
   bool _ascending = true;
   bool _isExporting = false;
-  bool _showMobileAnalytics = false;
 
   @override
   void dispose() {
-    _verticalScrollController.dispose();
-    _horizontalScrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -710,71 +719,38 @@ class _StatsViewState extends State<_StatsView> {
     }).toList();
 
     filtered.sort((a, b) {
-      final comparison = _compareTeams(a, b);
-
-      if (comparison != 0) {
-        return _ascending ? comparison : -comparison;
-      }
-
+      final aValue = _sortValue(a);
+      final bValue = _sortValue(b);
+      // Missing observations stay last in either sort direction.
+      if (aValue == null && bValue != null) return 1;
+      if (bValue == null && aValue != null) return -1;
+      final comparison = aValue == null ? 0 : aValue.compareTo(bValue!);
+      if (comparison != 0) return _ascending ? comparison : -comparison;
       return a.Team.compareTo(b.Team);
     });
-
     return filtered;
   }
 
-  int _compareTeams(TeamStat a, TeamStat b) {
-    switch (_sortKey) {
-      case 'team':
-        return a.Team.compareTo(b.Team);
+  num? _sortValue(TeamStat team) => switch (_sortKey) {
+        'team' => team.Team,
+        'rank' => team.Rank > 0 ? team.Rank : null,
+        'opr' => team.OPR,
+        'auto' => team.Auto,
+        'teleop' => team.Teleop,
+        'tower' => team.Tower,
+        'death' => team.ScoutEntries > 0 ? team.DeathRate : null,
+        'defense' => team.ScoutEntries > 0 ? team.DefenseRate : null,
+        'scouted' => team.ScoutedMatches,
+        _ => null,
+      };
 
-      case 'rank':
-        return a.Rank.compareTo(b.Rank);
-
-      case 'opr':
-        return a.OPR.compareTo(b.OPR);
-
-      case 'auto':
-        return a.Auto.compareTo(b.Auto);
-
-      case 'teleop':
-        return a.Teleop.compareTo(b.Teleop);
-
-      case 'endgame':
-        return a.Endgame.compareTo(b.Endgame);
-
-      case 'climb':
-        return a.Climb.compareTo(b.Climb);
-
-      default:
-        return 0;
-    }
-  }
-
-  double _getValue(TeamStat team, String key) {
-    switch (key) {
-      case 'team':
-        return team.Team.toDouble();
-
-      case 'rank':
-        return team.Rank.toDouble();
-
-      case 'opr':
-        return team.OPR;
-
-      case 'auto':
-        return team.Auto;
-
-      case 'teleop':
-        return team.Teleop;
-
-      case 'endgame':
-        return team.Endgame;
-
-      case 'climb':
-        return team.Climb;
-
-      default:
-        return 0;
+  @override
+  void didUpdateWidget(covariant _StatsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.showScoutingAnalysis &&
+        const {'death', 'defense', 'scouted'}.contains(_sortKey)) {
+      _sortKey = 'rank';
+      _ascending = true;
     }
   }
 
@@ -789,76 +765,8 @@ class _StatsViewState extends State<_StatsView> {
 
       // Team and rank naturally sort from lowest to highest.
       // Performance values naturally sort from highest to lowest.
-      _ascending = key == 'team' || key == 'rank';
+      _ascending = key == 'team' || key == 'rank' || key == 'death';
     });
-  }
-
-  double _minimum(List<TeamStat> stats, String key) {
-    if (stats.isEmpty) {
-      return 0;
-    }
-
-    return stats
-        .map((team) => _getValue(team, key))
-        .reduce((a, b) => a < b ? a : b);
-  }
-
-  double _maximum(List<TeamStat> stats, String key) {
-    if (stats.isEmpty) {
-      return 0;
-    }
-
-    return stats
-        .map((team) => _getValue(team, key))
-        .reduce((a, b) => a > b ? a : b);
-  }
-
-  double _average(List<TeamStat> stats, String key) {
-    if (stats.isEmpty) {
-      return 0;
-    }
-
-    final total = stats.fold<double>(
-      0,
-      (sum, team) => sum + _getValue(team, key),
-    );
-
-    return total / stats.length;
-  }
-
-  double _normalizedValue({
-    required double value,
-    required double min,
-    required double max,
-    bool lowerIsBetter = false,
-  }) {
-    if (max == min) {
-      return 0.5;
-    }
-
-    var normalized = ((value - min) / (max - min)).clamp(0.0, 1.0);
-
-    if (lowerIsBetter) {
-      normalized = 1 - normalized;
-    }
-
-    return normalized;
-  }
-
-  Color _heatColor(double normalized) {
-    if (normalized < 0.5) {
-      return Color.lerp(
-        const Color(0xFFE45D5D),
-        const Color(0xFFF1B84B),
-        normalized * 2,
-      )!;
-    }
-
-    return Color.lerp(
-      const Color(0xFFF1B84B),
-      const Color(0xFF4FD08B),
-      (normalized - 0.5) * 2,
-    )!;
   }
 
   void _goToTeam(TeamStat team) {
@@ -890,25 +798,33 @@ class _StatsViewState extends State<_StatsView> {
   }
 
   String _createCsv(List<TeamStat> stats) {
-    final rows = <List<Object>>[
+    final rows = <List<Object?>>[
       [
         'Team',
         'Rank',
         'OPR',
         'Auto',
         'Teleop',
-        'Endgame',
-        'Climb',
+        'Tower',
+        if (widget.showScoutingAnalysis) ...[
+          'DeathRate',
+          'DefenseRate',
+          'ScoutedMatches',
+        ],
       ],
       ...stats.map(
         (team) => [
           team.Team,
           team.Rank,
-          team.OPR.toStringAsFixed(2),
-          team.Auto.toStringAsFixed(2),
-          team.Teleop.toStringAsFixed(2),
-          team.Endgame.toStringAsFixed(2),
-          team.Climb.toStringAsFixed(2),
+          team.OPR,
+          team.Auto,
+          team.Teleop,
+          team.Tower,
+          if (widget.showScoutingAnalysis) ...[
+            team.ScoutEntries > 0 ? team.DeathRate : null,
+            team.ScoutEntries > 0 ? team.DefenseRate : null,
+            team.ScoutedMatches,
+          ],
         ],
       ),
     ];
@@ -1001,60 +917,112 @@ class _StatsViewState extends State<_StatsView> {
     final visibleStats = _visibleStats;
     final isMobile = MediaQuery.sizeOf(context).width < 720;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-      child: Column(
-        children: [
-          if (isMobile) ...[
-            Semantics(
-              expanded: _showMobileAnalytics,
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() {
-                  _showMobileAnalytics = !_showMobileAnalytics;
-                }),
-                icon: const Icon(Icons.leaderboard_rounded),
-                label: Row(
-                  children: [
-                    const Expanded(child: Text('Team Analytics')),
-                    Text('${visibleStats.length} teams'),
-                    const SizedBox(width: 8),
-                    Icon(_showMobileAnalytics
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded),
-                  ],
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: AppColors.surface,
-                  minimumSize: const Size.fromHeight(48),
-                  shape: const StadiumBorder(),
-                  side: const BorderSide(color: _borderColor),
-                ),
+    return ColoredBox(
+      color: EventStatsGrid.backgroundColor,
+      child: Padding(
+        padding:
+            EdgeInsets.fromLTRB(isMobile ? 12 : 16, 12, isMobile ? 12 : 16, 12),
+        child: Column(
+          children: [
+            if (isMobile)
+              _buildMobileToolbar(visibleStats)
+            else
+              _buildToolbar(visibleStats),
+            const SizedBox(height: 12),
+            Expanded(
+              child: visibleStats.isEmpty
+                  ? _buildNoSearchResults()
+                  : EventStatsGrid(
+                      key: ValueKey(_normalizedEventCode),
+                      teams: visibleStats,
+                      eventTeams: widget.stats,
+                      showScoutingAnalysis: widget.showScoutingAnalysis,
+                      sortKey: _sortKey,
+                      ascending: _ascending,
+                      onSort: _sort,
+                      onTeamTap: _goToTeam,
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileToolbar(List<TeamStat> visibleStats) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Team stats',
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  Text(
+                    '${visibleStats.length} teams · Sorted by ${_sortLabel()}',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12),
+                  ),
+                ],
               ),
             ),
-            if (_showMobileAnalytics) ...[
-              const SizedBox(height: 12),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      _buildToolbar(visibleStats),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ] else ...[
-            _buildToolbar(visibleStats),
+            IconButton(
+              tooltip: 'Export CSV',
+              onPressed: _isExporting ? null : _exportCsv,
+              icon: _isExporting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.download_rounded),
+            ),
           ],
-          const SizedBox(height: 14),
-          Expanded(
-            child: visibleStats.isEmpty
-                ? _buildNoSearchResults()
-                : _buildTable(visibleStats),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: _buildSearchField()),
+            const SizedBox(width: 4),
+            PopupMenuButton<String>(
+              tooltip: 'Sort teams',
+              initialValue: _sortKey,
+              icon: const Icon(Icons.sort_rounded),
+              onSelected: _sort,
+              itemBuilder: (_) => [
+                for (final item in [
+                  ('rank', 'Rank'),
+                  ('team', 'Team'),
+                  ('opr', 'OPR'),
+                  ('auto', 'Auto'),
+                  ('teleop', 'Teleop'),
+                  ('tower', 'Tower'),
+                  if (widget.showScoutingAnalysis) ...[
+                    ('death', 'Death rate'),
+                    ('defense', 'Defense rate'),
+                    ('scouted', 'Scouted matches'),
+                  ],
+                ])
+                  CheckedPopupMenuItem(
+                    value: item.$1,
+                    checked: _sortKey == item.$1,
+                    child: Text(item.$2),
+                  ),
+              ],
+            ),
+            IconButton(
+              tooltip: _ascending ? 'Sort descending' : 'Sort ascending',
+              onPressed: () => setState(() => _ascending = !_ascending),
+              icon: Icon(_ascending
+                  ? Icons.arrow_upward_rounded
+                  : Icons.arrow_downward_rounded),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -1063,18 +1031,11 @@ class _StatsViewState extends State<_StatsView> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: EventStatsGrid.surfaceColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.07),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 18,
-            offset: const Offset(0, 7),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1109,10 +1070,6 @@ class _StatsViewState extends State<_StatsView> {
               );
             },
           ),
-          const SizedBox(height: 18),
-          const Divider(height: 1, color: _borderColor),
-          const SizedBox(height: 16),
-          _buildSummary(visibleStats),
         ],
       ),
     );
@@ -1130,7 +1087,7 @@ class _StatsViewState extends State<_StatsView> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: const Color(0xFF356C9F),
+                color: const Color(0xFF344A5E),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Icon(
@@ -1245,7 +1202,7 @@ class _StatsViewState extends State<_StatsView> {
                 ),
               ),
         filled: true,
-        fillColor: AppColors.surface,
+        fillColor: EventStatsGrid.surfaceColor,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
@@ -1288,7 +1245,7 @@ class _StatsViewState extends State<_StatsView> {
         _isExporting ? 'Exporting' : 'Export CSV',
       ),
       style: FilledButton.styleFrom(
-        backgroundColor: const Color(0xFF1976D2),
+        backgroundColor: const Color(0xFF365369),
         foregroundColor: Colors.white,
         disabledBackgroundColor: const Color(0xFF26384A),
         disabledForegroundColor: Colors.white54,
@@ -1304,151 +1261,11 @@ class _StatsViewState extends State<_StatsView> {
     );
   }
 
-  Widget _buildSummary(List<TeamStat> stats) {
-    final sourceStats = stats.isEmpty ? widget.stats : stats;
-
-    final metrics = [
-      _summaryMetric(
-        icon: Icons.groups_2_rounded,
-        label: _searchQuery.isEmpty ? 'Teams' : 'Teams shown',
-        value: sourceStats.length.toString(),
-        helper: _searchQuery.isEmpty
-            ? 'At this event'
-            : '${widget.stats.length} total',
-      ),
-      _summaryMetric(
-        icon: Icons.analytics_rounded,
-        label: 'Average OPR',
-        value: _average(sourceStats, 'opr').toStringAsFixed(1),
-        helper: 'Overall output',
-      ),
-      _summaryMetric(
-        icon: Icons.bolt_rounded,
-        label: 'Average Auto',
-        value: _average(sourceStats, 'auto').toStringAsFixed(1),
-        helper: 'Autonomous period',
-      ),
-      _summaryMetric(
-        icon: Icons.sports_esports_rounded,
-        label: 'Average Teleop',
-        value: _average(sourceStats, 'teleop').toStringAsFixed(1),
-        helper: 'Driver-controlled',
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 720) {
-          final width = (constraints.maxWidth - 12) / 2;
-
-          return Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: metrics
-                .map(
-                  (card) => SizedBox(
-                    width: width,
-                    child: card,
-                  ),
-                )
-                .toList(),
-          );
-        }
-
-        return Row(
-          children: [
-            for (var index = 0; index < metrics.length; index++) ...[
-              Expanded(child: metrics[index]),
-              if (index != metrics.length - 1)
-                const VerticalDivider(
-                  width: 25,
-                  color: _borderColor,
-                ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _summaryMetric({
-    required IconData icon,
-    required String label,
-    required String value,
-    required String helper,
-  }) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 70),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFF3196FF).withOpacity(0.12),
-              borderRadius: BorderRadius.circular(11),
-              border: Border.all(
-                color: const Color(0xFF3196FF).withOpacity(0.16),
-              ),
-            ),
-            child: Icon(
-              icon,
-              color: const Color(0xFF55A9FF),
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFC6CEDA),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  helper,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white30,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildNoSearchResults() {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: EventStatsGrid.surfaceColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.07),
@@ -1510,503 +1327,6 @@ class _StatsViewState extends State<_StatsView> {
     );
   }
 
-  Widget _buildTable(List<TeamStat> stats) {
-    // Use the full event range so heat colors stay consistent while searching.
-    final rangeStats = widget.stats;
-
-    final oprMin = _minimum(rangeStats, 'opr');
-    final oprMax = _maximum(rangeStats, 'opr');
-
-    final autoMin = _minimum(rangeStats, 'auto');
-    final autoMax = _maximum(rangeStats, 'auto');
-
-    final teleopMin = _minimum(rangeStats, 'teleop');
-    final teleopMax = _maximum(rangeStats, 'teleop');
-
-    final endgameMin = _minimum(rangeStats, 'endgame');
-    final endgameMax = _maximum(rangeStats, 'endgame');
-
-    final climbMin = _minimum(rangeStats, 'climb');
-    final climbMax = _maximum(rangeStats, 'climb');
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.07),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.14),
-            blurRadius: 15,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final tableWidth =
-                    constraints.maxWidth < 1010 ? 1010.0 : constraints.maxWidth;
-
-                return Scrollbar(
-                  controller: _horizontalScrollController,
-                  thumbVisibility: true,
-                  scrollbarOrientation: ScrollbarOrientation.bottom,
-                  child: SingleChildScrollView(
-                    controller: _horizontalScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: tableWidth,
-                      height: constraints.maxHeight,
-                      child: Scrollbar(
-                        controller: _verticalScrollController,
-                        thumbVisibility: true,
-                        child: SingleChildScrollView(
-                          controller: _verticalScrollController,
-                          child: DataTableTheme(
-                            data: DataTableThemeData(
-                              headingRowColor: WidgetStateProperty.all(
-                                const Color(0xFF1C212A),
-                              ),
-                              headingTextStyle: const TextStyle(
-                                color: Color(0xFFDCE4EE),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              dataTextStyle: const TextStyle(
-                                color: Color(0xFFD2D8E1),
-                                fontSize: 13,
-                              ),
-                              dividerThickness: 0,
-                            ),
-                            child: DataTable(
-                              showCheckboxColumn: false,
-                              sortColumnIndex: _sortColumnIndex(),
-                              sortAscending: _ascending,
-                              columnSpacing: 24,
-                              horizontalMargin: 20,
-                              headingRowHeight: 54,
-                              dataRowMinHeight: 66,
-                              dataRowMaxHeight: 66,
-                              border: TableBorder(
-                                horizontalInside: BorderSide(
-                                  color: Colors.white.withOpacity(0.045),
-                                ),
-                              ),
-                              columns: [
-                                _sortableColumn(
-                                  label: 'Team',
-                                  key: 'team',
-                                  numeric: false,
-                                ),
-                                _sortableColumn(
-                                  label: 'Rank',
-                                  key: 'rank',
-                                ),
-                                _sortableColumn(
-                                  label: 'OPR',
-                                  key: 'opr',
-                                ),
-                                _sortableColumn(
-                                  label: 'Auto',
-                                  key: 'auto',
-                                ),
-                                _sortableColumn(
-                                  label: 'Teleop',
-                                  key: 'teleop',
-                                ),
-                                _sortableColumn(
-                                  label: 'Endgame',
-                                  key: 'endgame',
-                                ),
-                                _sortableColumn(
-                                  label: 'Climb',
-                                  key: 'climb',
-                                ),
-                              ],
-                              rows: List.generate(stats.length, (index) {
-                                final team = stats[index];
-
-                                return DataRow(
-                                  color:
-                                      WidgetStateProperty.resolveWith<Color?>(
-                                    (states) {
-                                      if (states
-                                          .contains(WidgetState.hovered)) {
-                                        return const Color(0xFF3196FF)
-                                            .withOpacity(0.075);
-                                      }
-
-                                      if (states
-                                          .contains(WidgetState.pressed)) {
-                                        return const Color(0xFF3196FF)
-                                            .withOpacity(0.12);
-                                      }
-
-                                      if (index.isOdd) {
-                                        return Colors.white.withOpacity(0.014);
-                                      }
-
-                                      return Colors.transparent;
-                                    },
-                                  ),
-                                  onSelectChanged: (_) => _goToTeam(team),
-                                  cells: [
-                                    _teamCell(team),
-                                    _rankCell(team.Rank),
-                                    _statCell(
-                                      value: team.OPR,
-                                      min: oprMin,
-                                      max: oprMax,
-                                    ),
-                                    _statCell(
-                                      value: team.Auto,
-                                      min: autoMin,
-                                      max: autoMax,
-                                    ),
-                                    _statCell(
-                                      value: team.Teleop,
-                                      min: teleopMin,
-                                      max: teleopMax,
-                                    ),
-                                    _statCell(
-                                      value: team.Endgame,
-                                      min: endgameMin,
-                                      max: endgameMax,
-                                    ),
-                                    _statCell(
-                                      value: team.Climb,
-                                      min: climbMin,
-                                      max: climbMax,
-                                    ),
-                                  ],
-                                );
-                              }),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          _buildTableFooter(stats.length),
-        ],
-      ),
-    );
-  }
-
-  DataColumn _sortableColumn({
-    required String label,
-    required String key,
-    bool numeric = true,
-  }) {
-    return DataColumn(
-      numeric: numeric,
-      tooltip: 'Sort by $label',
-      onSort: (_, __) => _sort(key),
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label),
-          if (_sortKey == key) ...[
-            const SizedBox(width: 4),
-            Icon(
-              _ascending
-                  ? Icons.arrow_upward_rounded
-                  : Icons.arrow_downward_rounded,
-              size: 13,
-              color: const Color(0xFF55A9FF),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  DataCell _teamCell(TeamStat team) {
-    return DataCell(
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 35,
-            height: 35,
-            decoration: BoxDecoration(
-              color: const Color(0xFF3196FF).withOpacity(0.11),
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(
-                color: const Color(0xFF3196FF).withOpacity(0.18),
-              ),
-            ),
-            child: const Icon(
-              Icons.groups_2_outlined,
-              size: 18,
-              color: Color(0xFF55A9FF),
-            ),
-          ),
-          const SizedBox(width: 11),
-          Text(
-            team.Team.toString(),
-            style: const TextStyle(
-              color: Color(0xFF72B7FF),
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(width: 6),
-          const Icon(
-            Icons.chevron_right_rounded,
-            color: Colors.white30,
-            size: 18,
-          ),
-        ],
-      ),
-    );
-  }
-
-  DataCell _rankCell(int rank) {
-    final style = _rankStyle(rank);
-
-    return DataCell(
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          constraints: const BoxConstraints(minWidth: 55),
-          padding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 7,
-          ),
-          decoration: BoxDecoration(
-            color: style.background,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: style.border,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (style.icon != null) ...[
-                Icon(
-                  style.icon,
-                  color: style.foreground,
-                  size: 14,
-                ),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                '#$rank',
-                style: TextStyle(
-                  color: style.foreground,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  _RankStyle _rankStyle(int rank) {
-    switch (rank) {
-      case 1:
-        return _RankStyle(
-          background: const Color(0xFFF0B429).withOpacity(0.14),
-          border: const Color(0xFFF0B429).withOpacity(0.36),
-          foreground: const Color(0xFFFFCD57),
-          icon: Icons.workspace_premium_rounded,
-        );
-
-      case 2:
-        return _RankStyle(
-          background: const Color(0xFFB8C2CC).withOpacity(0.12),
-          border: const Color(0xFFB8C2CC).withOpacity(0.28),
-          foreground: const Color(0xFFD5DCE4),
-          icon: Icons.workspace_premium_rounded,
-        );
-
-      case 3:
-        return _RankStyle(
-          background: const Color(0xFFD99155).withOpacity(0.13),
-          border: const Color(0xFFD99155).withOpacity(0.31),
-          foreground: const Color(0xFFF0AB73),
-          icon: Icons.workspace_premium_rounded,
-        );
-
-      default:
-        return _RankStyle(
-          background: Colors.white.withOpacity(0.045),
-          border: Colors.white.withOpacity(0.075),
-          foreground: const Color(0xFFC6CED8),
-        );
-    }
-  }
-
-  DataCell _statCell({
-    required double value,
-    required double min,
-    required double max,
-    int decimals = 1,
-    bool lowerIsBetter = false,
-  }) {
-    final normalized = _normalizedValue(
-      value: value,
-      min: min,
-      max: max,
-      lowerIsBetter: lowerIsBetter,
-    );
-
-    final color = _heatColor(normalized);
-
-    return DataCell(
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          width: 82,
-          padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.095),
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(
-              color: color.withOpacity(0.2),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                value.toStringAsFixed(decimals),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: LinearProgressIndicator(
-                  value: normalized,
-                  minHeight: 3,
-                  backgroundColor: Colors.white.withOpacity(0.06),
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTableFooter(int shownTeams) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        horizontal: 18,
-        vertical: 12,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(
-          top: BorderSide(
-            color: Colors.white.withOpacity(0.055),
-          ),
-        ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final count = Text(
-            'Showing $shownTeams of ${widget.stats.length} teams',
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-            ),
-          );
-
-          final legend = Wrap(
-            spacing: 13,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: const [
-              _LegendItem(
-                color: Color(0xFFE45D5D),
-                label: 'Lower',
-              ),
-              _LegendItem(
-                color: Color(0xFFF1B84B),
-                label: 'Average',
-              ),
-              _LegendItem(
-                color: Color(0xFF4FD08B),
-                label: 'Higher',
-              ),
-            ],
-          );
-
-          if (constraints.maxWidth < 590) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                count,
-                const SizedBox(height: 8),
-                legend,
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              Expanded(child: count),
-              legend,
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  int? _sortColumnIndex() {
-    switch (_sortKey) {
-      case 'team':
-        return 0;
-
-      case 'rank':
-        return 1;
-
-      case 'opr':
-        return 2;
-
-      case 'auto':
-        return 3;
-
-      case 'teleop':
-        return 4;
-
-      case 'endgame':
-        return 5;
-
-      case 'climb':
-        return 6;
-
-      default:
-        return null;
-    }
-  }
-
   String _sortLabel() {
     switch (_sortKey) {
       case 'team':
@@ -2024,11 +1344,14 @@ class _StatsViewState extends State<_StatsView> {
       case 'teleop':
         return 'teleop';
 
-      case 'endgame':
-        return 'endgame';
-
-      case 'climb':
-        return 'climb';
+      case 'tower':
+        return 'tower';
+      case 'death':
+        return 'death rate';
+      case 'defense':
+        return 'defense rate';
+      case 'scouted':
+        return 'scouted matches';
 
       default:
         return _sortKey;
@@ -2036,107 +1359,7 @@ class _StatsViewState extends State<_StatsView> {
   }
 }
 
-class _RankStyle {
-  final Color background;
-  final Color border;
-  final Color foreground;
-  final IconData? icon;
-
-  const _RankStyle({
-    required this.background,
-    required this.border,
-    required this.foreground,
-    this.icon,
-  });
-}
-
-class _LegendItem extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendItem({
-    required this.color,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: color.withOpacity(0.35),
-                blurRadius: 5,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white38,
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-}
 /* ---------------- CHARTS ---------------- */
-
-enum _HistoryMetric {
-  opr,
-  autoFuel,
-  teleopFuel,
-}
-
-extension _HistoryMetricDetails on _HistoryMetric {
-  String get label {
-    switch (this) {
-      case _HistoryMetric.opr:
-        return 'OPR';
-      case _HistoryMetric.autoFuel:
-        return 'Auto Fuel';
-      case _HistoryMetric.teleopFuel:
-        return 'Teleop Fuel';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case _HistoryMetric.opr:
-        return Icons.show_chart_rounded;
-      case _HistoryMetric.autoFuel:
-        return Icons.bolt_rounded;
-      case _HistoryMetric.teleopFuel:
-        return Icons.sports_esports_rounded;
-    }
-  }
-
-  List<int>? get dashArray {
-    switch (this) {
-      case _HistoryMetric.opr:
-        return null;
-      case _HistoryMetric.autoFuel:
-        return const [10, 5];
-      case _HistoryMetric.teleopFuel:
-        return const [3, 4];
-    }
-  }
-
-  double? valueFor(TeamMatchHistory history) {
-    return history.OPR;
-  }
-}
 
 final List<Color> _chartTeamColors = List<Color>.generate(
   100,
@@ -2161,23 +1384,7 @@ final List<Color> _chartTeamColors = List<Color>.generate(
   growable: false,
 );
 
-class _HistoryChartSeries {
-  final TeamStat team;
-  final _HistoryMetric metric;
-  final Color color;
-  final List<FlSpot> spots;
-  final Map<int, TeamMatchHistory> historyByMatchPlayed;
-
-  const _HistoryChartSeries({
-    required this.team,
-    required this.metric,
-    required this.color,
-    required this.spots,
-    required this.historyByMatchPlayed,
-  });
-}
-
-class _ChartsView extends StatefulWidget {
+class _ChartsView extends StatelessWidget {
   final String eventCode;
   final List<TeamStat> stats;
 
@@ -2186,308 +1393,31 @@ class _ChartsView extends StatefulWidget {
     required this.stats,
   });
 
-  @override
-  State<_ChartsView> createState() => _ChartsViewState();
-}
-
-class _ChartsViewState extends State<_ChartsView> {
-  final Set<int> _selectedTeams = <int>{};
-  final Set<_HistoryMetric> _visibleMetrics = {
-    _HistoryMetric.opr,
-    _HistoryMetric.autoFuel,
-    _HistoryMetric.teleopFuel,
-  };
-
-  @override
-  void initState() {
-    super.initState();
-    _selectDefaultTeams();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ChartsView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    final validTeams = _teamsWithHistory.map((team) => team.Team).toSet();
-    _selectedTeams.removeWhere((team) => !validTeams.contains(team));
-
-    if (_selectedTeams.isEmpty && validTeams.isNotEmpty) {
-      _selectDefaultTeams();
-    }
-  }
-
-  List<TeamStat> get _teamsWithHistory {
-    final teams = widget.stats
-        .where((team) => team.MatchHistory.isNotEmpty)
-        .toList()
-      ..sort((a, b) => b.OPR.compareTo(a.OPR));
-
-    return teams;
-  }
-
-  List<TeamStat> get _selectedTeamStats {
-    final teams = widget.stats
-        .where((team) => _selectedTeams.contains(team.Team))
-        .toList()
-      ..sort((a, b) => b.OPR.compareTo(a.OPR));
-
-    return teams;
-  }
-
-  void _selectDefaultTeams() {
-    final teams = _teamsWithHistory.take(3);
-    _selectedTeams
-      ..clear()
-      ..addAll(teams.map((team) => team.Team));
-  }
-
   Color _teamColor(int teamNumber) {
-    final orderedTeams = widget.stats.map((team) => team.Team).toList()..sort();
+    final orderedTeams = stats.map((team) => team.Team).toList()..sort();
     final index = orderedTeams.indexOf(teamNumber);
     final safeIndex = index < 0 ? teamNumber.abs() : index;
 
     return _chartTeamColors[safeIndex % _chartTeamColors.length];
   }
 
-  Future<void> _showTeamPicker() async {
-    final searchController = TextEditingController();
-    final workingSelection = Set<int>.from(_selectedTeams);
-    var query = '';
-
-    final selected = await showDialog<Set<int>>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final filteredTeams = _teamsWithHistory.where((team) {
-              return team.Team.toString().contains(query.trim());
-            }).toList();
-
-            return AlertDialog(
-              backgroundColor: _surfaceColor,
-              surfaceTintColor: Colors.transparent,
-              title: const Text(
-                'Choose teams',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: SizedBox(
-                width: 520,
-                height: 500,
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: searchController,
-                      keyboardType: TextInputType.number,
-                      autofocus: true,
-                      onChanged: (value) {
-                        setDialogState(() => query = value);
-                      },
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Search team number',
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: Colors.white54,
-                        ),
-                        filled: true,
-                        fillColor: _surfaceColorLight,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            setDialogState(() {
-                              workingSelection.addAll(
-                                filteredTeams.map((team) => team.Team),
-                              );
-                            });
-                          },
-                          child: const Text('Select shown'),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            setDialogState(workingSelection.clear);
-                          },
-                          child: const Text('Clear'),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${workingSelection.length} selected',
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(color: _borderColor),
-                    Expanded(
-                      child: filteredTeams.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'No teams found',
-                                style: TextStyle(color: Colors.white54),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: filteredTeams.length,
-                              itemBuilder: (context, index) {
-                                final team = filteredTeams[index];
-                                final checked =
-                                    workingSelection.contains(team.Team);
-
-                                return CheckboxListTile(
-                                  value: checked,
-                                  activeColor: _accentColor,
-                                  checkColor: Colors.white,
-                                  contentPadding: EdgeInsets.zero,
-                                  title: Text(
-                                    'Team ${team.Team}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'OPR ${team.OPR.toStringAsFixed(1)} • '
-                                    '${team.MatchHistory.length} history points',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                    ),
-                                  ),
-                                  secondary: Container(
-                                    width: 10,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: _teamColor(team.Team),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                  ),
-                                  onChanged: (value) {
-                                    setDialogState(() {
-                                      if (value == true) {
-                                        workingSelection.add(team.Team);
-                                      } else {
-                                        workingSelection.remove(team.Team);
-                                      }
-                                    });
-                                  },
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext, workingSelection);
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _accentColor,
-                  ),
-                  child: const Text('Apply'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    searchController.dispose();
-
-    if (selected == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _selectedTeams
-        ..clear()
-        ..addAll(selected);
-    });
-  }
-
-  List<_HistoryChartSeries> _buildHistorySeries() {
-    final series = <_HistoryChartSeries>[];
-
-    for (final team in _selectedTeamStats) {
-      final color = _teamColor(team.Team);
-
-      for (final metric in _HistoryMetric.values) {
-        if (!_visibleMetrics.contains(metric)) {
-          continue;
-        }
-
-        final spots = <FlSpot>[];
-        final historyByMatchPlayed = <int, TeamMatchHistory>{};
-
-        for (final history in team.MatchHistory) {
-          final value = metric.valueFor(history);
-
-          if (value == null || !value.isFinite || history.MatchesPlayed <= 0) {
-            continue;
-          }
-
-          spots.add(
-            FlSpot(
-              history.MatchesPlayed.toDouble(),
-              value,
-            ),
-          );
-          historyByMatchPlayed[history.MatchesPlayed] = history;
-        }
-
-        spots.sort((a, b) => a.x.compareTo(b.x));
-
-        if (spots.isNotEmpty) {
-          series.add(
-            _HistoryChartSeries(
-              team: team,
-              metric: metric,
-              color: color,
-              spots: spots,
-              historyByMatchPlayed: historyByMatchPlayed,
-            ),
-          );
-        }
-      }
-    }
-
-    return series;
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (widget.stats.isEmpty) {
+    if (stats.isEmpty) {
       return _EmptyState(
         icon: Icons.query_stats_rounded,
         title: 'No chart data',
-        message: 'Stats for ${widget.eventCode} have not been cached yet.',
+        message: 'Stats for ${eventCode} have not been cached yet.',
       );
     }
 
-    final topTeams = [...widget.stats]..sort((a, b) => b.OPR.compareTo(a.OPR));
+    final topTeams = [...stats]..sort((a, b) => b.OPR.compareTo(a.OPR));
     final topTeam = topTeams.first;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
         _buildChartsHeader(topTeam),
-        const SizedBox(height: 14),
-        _buildHistoryChartCard(),
         const SizedBox(height: 14),
         _buildOprBarChartCard(),
       ],
@@ -2527,8 +1457,8 @@ class _ChartsViewState extends State<_ChartsView> {
               ),
               const SizedBox(height: 6),
               Text(
-                '${_eventKeyForApi(widget.eventCode).toUpperCase()} • '
-                'Track team progress and compare event OPRs.',
+                '${_eventKeyForApi(eventCode).toUpperCase()} • '
+                'Compare current event OPRs.',
                 style: const TextStyle(
                   color: Colors.white54,
                   fontSize: 13,
@@ -2546,12 +1476,8 @@ class _ChartsViewState extends State<_ChartsView> {
                 value: '${topTeam.Team} • ${topTeam.OPR.toStringAsFixed(1)}',
               ),
               _ChartSummaryPill(
-                label: 'History teams',
-                value: _teamsWithHistory.length.toString(),
-              ),
-              _ChartSummaryPill(
-                label: 'Selected',
-                value: _selectedTeams.length.toString(),
+                label: 'Teams',
+                value: stats.length.toString(),
               ),
             ],
           );
@@ -2579,302 +1505,8 @@ class _ChartsViewState extends State<_ChartsView> {
     );
   }
 
-  Widget _buildHistoryChartCard() {
-    final series = _buildHistorySeries();
-    final selectedTeams = _selectedTeamStats;
-
-    return _ChartCard(
-      title: 'Team progress',
-      subtitle:
-          'Cumulative OPR and fuel estimates after each match the team played.',
-      trailing: FilledButton.icon(
-        onPressed: _showTeamPicker,
-        icon: const Icon(Icons.group_add_outlined),
-        label: const Text('Choose teams'),
-        style: FilledButton.styleFrom(
-          backgroundColor: _accentColor,
-          foregroundColor: Colors.white,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 9,
-            runSpacing: 9,
-            children: _HistoryMetric.values.map((metric) {
-              final selected = _visibleMetrics.contains(metric);
-
-              return FilterChip(
-                selected: selected,
-                onSelected: (value) {
-                  setState(() {
-                    if (value) {
-                      _visibleMetrics.add(metric);
-                    } else {
-                      _visibleMetrics.remove(metric);
-                    }
-                  });
-                },
-                avatar: Icon(
-                  metric.icon,
-                  size: 17,
-                  color: selected ? Colors.white : Colors.white54,
-                ),
-                label: Text(metric.label),
-                labelStyle: TextStyle(
-                  color: selected ? Colors.white : Colors.white60,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-                selectedColor: _accentColor.withOpacity(0.22),
-                backgroundColor: _surfaceColorLight,
-                checkmarkColor: _accentColor,
-                side: BorderSide(
-                  color:
-                      selected ? _accentColor.withOpacity(0.70) : _borderColor,
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final team in selectedTeams)
-                InputChip(
-                  label: Text('Team ${team.Team}'),
-                  avatar: CircleAvatar(
-                    radius: 7,
-                    backgroundColor: _teamColor(team.Team),
-                  ),
-                  onDeleted: () {
-                    setState(() => _selectedTeams.remove(team.Team));
-                  },
-                  deleteIconColor: Colors.white54,
-                  labelStyle: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  backgroundColor: _surfaceColorLight,
-                  side: const BorderSide(color: _borderColor),
-                ),
-              if (selectedTeams.isEmpty)
-                const Text(
-                  'No teams selected.',
-                  style: TextStyle(color: Colors.white54),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_teamsWithHistory.isEmpty)
-            const _ChartEmptyState(
-              icon: Icons.history_toggle_off_rounded,
-              message:
-                  'No MatchHistory values were parsed. Update team_stat.dart so it reads the MatchHistory array from /stats.',
-            )
-          else if (_selectedTeams.isEmpty)
-            const _ChartEmptyState(
-              icon: Icons.group_off_outlined,
-              message: 'Choose at least one team to display its progress.',
-            )
-          else if (_visibleMetrics.isEmpty)
-            const _ChartEmptyState(
-              icon: Icons.hide_source_rounded,
-              message: 'Turn on at least one metric above.',
-            )
-          else if (series.isEmpty)
-            const _ChartEmptyState(
-              icon: Icons.show_chart_rounded,
-              message:
-                  'The selected metrics do not contain any numeric history values.',
-            )
-          else
-            _buildHistoryLineChart(series),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryLineChart(List<_HistoryChartSeries> series) {
-    final allSpots = series.expand((item) => item.spots).toList();
-    final maxMatches = allSpots.map((spot) => spot.x).fold<double>(
-          1,
-          (current, value) => math.max(current, value).toDouble(),
-        );
-    final rawMinY = allSpots.map((spot) => spot.y).fold<double>(
-          0,
-          (current, value) => math.min(current, value).toDouble(),
-        );
-    final rawMaxY = allSpots.map((spot) => spot.y).fold<double>(
-          0,
-          (current, value) => math.max(current, value).toDouble(),
-        );
-
-    final yRange = math.max(1.0, rawMaxY - rawMinY).toDouble();
-    final minY = math.min(0.0, rawMinY - yRange * 0.08).toDouble();
-    final maxY = math.max(1.0, rawMaxY + yRange * 0.10).toDouble();
-    final horizontalInterval = math.max(1.0, (maxY - minY) / 5).toDouble();
-    final xInterval = math.max(1.0, (maxMatches / 8).ceilToDouble()).toDouble();
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final chartWidth = math
-            .max(
-              constraints.maxWidth,
-              math.max(680.0, maxMatches * 58),
-            )
-            .toDouble();
-
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: chartWidth,
-            height: 370,
-            child: LineChart(
-              LineChartData(
-                minX: 1,
-                maxX: math.max(1.0, maxMatches).toDouble(),
-                minY: minY,
-                maxY: maxY,
-                clipData: const FlClipData.all(),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: true,
-                  horizontalInterval: horizontalInterval,
-                  verticalInterval: xInterval,
-                  getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.white.withOpacity(0.065),
-                    strokeWidth: 1,
-                  ),
-                  getDrawingVerticalLine: (_) => FlLine(
-                    color: Colors.white.withOpacity(0.04),
-                    strokeWidth: 1,
-                  ),
-                ),
-                borderData: FlBorderData(
-                  show: true,
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.08),
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    axisNameWidget: const Text(
-                      'Value',
-                      style: TextStyle(
-                        color: Colors.white38,
-                        fontSize: 11,
-                      ),
-                    ),
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 52,
-                      interval: horizontalInterval,
-                      getTitlesWidget: (value, meta) {
-                        return SideTitleWidget(
-                          meta: meta,
-                          child: Text(
-                            value.toStringAsFixed(0),
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 10,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    axisNameWidget: const Text(
-                      'Team match played',
-                      style: TextStyle(
-                        color: Colors.white38,
-                        fontSize: 11,
-                      ),
-                    ),
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 42,
-                      interval: xInterval,
-                      getTitlesWidget: (value, meta) {
-                        final rounded = value.round();
-
-                        if (rounded < 1 || (value - rounded).abs() > 0.01) {
-                          return const SizedBox.shrink();
-                        }
-
-                        return SideTitleWidget(
-                          meta: meta,
-                          space: 9,
-                          child: Text(
-                            'M$rounded',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 10,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                lineTouchData: LineTouchData(
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (_) => const Color(0xFF11151C),
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                        final item = series[spot.barIndex];
-                        final history =
-                            item.historyByMatchPlayed[spot.x.round()];
-                        final matchLabel =
-                            history?.MatchNumber ?? 'Match ${spot.x.round()}';
-
-                        return LineTooltipItem(
-                          'Team ${item.team.Team} • $matchLabel\n'
-                          '${item.metric.label}: ${spot.y.toStringAsFixed(1)}',
-                          TextStyle(
-                            color: item.color,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        );
-                      }).toList();
-                    },
-                  ),
-                ),
-                lineBarsData: series.map((item) {
-                  return LineChartBarData(
-                    spots: item.spots,
-                    isCurved: true,
-                    curveSmoothness: 0.24,
-                    color: item.color,
-                    barWidth: item.metric == _HistoryMetric.opr ? 3 : 2.5,
-                    dashArray: item.metric.dashArray,
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: item.spots.length <= 14,
-                    ),
-                    belowBarData: BarAreaData(show: false),
-                  );
-                }).toList(),
-              ),
-              duration: const Duration(milliseconds: 320),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildOprBarChartCard() {
-    final teams = [...widget.stats]..sort((a, b) => b.OPR.compareTo(a.OPR));
+    final teams = [...stats]..sort((a, b) => b.OPR.compareTo(a.OPR));
 
     return _ChartCard(
       title: 'All team OPRs',
@@ -3040,13 +1672,11 @@ class _ChartCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final Widget child;
-  final Widget? trailing;
 
   const _ChartCard({
     required this.title,
     required this.subtitle,
     required this.child,
-    this.trailing,
   });
 
   @override
@@ -3057,54 +1687,27 @@ class _ChartCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final heading = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12.5,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              );
-
-              if (trailing == null) {
-                return heading;
-              }
-
-              if (constraints.maxWidth < 620) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    heading,
-                    const SizedBox(height: 12),
-                    trailing!,
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  Expanded(child: heading),
-                  const SizedBox(width: 14),
-                  trailing!,
-                ],
-              );
-            },
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12.5,
+                  height: 1.35,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 18),
           child,
@@ -3160,47 +1763,6 @@ class _ChartSummaryPill extends StatelessWidget {
     );
   }
 }
-
-class _ChartEmptyState extends StatelessWidget {
-  final IconData icon;
-  final String message;
-
-  const _ChartEmptyState({
-    required this.icon,
-    required this.message,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 220),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: _surfaceColorLight,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _borderColor),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: Colors.white30, size: 42),
-          const SizedBox(height: 12),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white54,
-              height: 1.45,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/* ---------------- QUALIFICATIONS ---------------- */
 
 class _QualsView extends StatefulWidget {
   final String eventCode;

@@ -5,6 +5,7 @@ import 'package:app/models/2026Matchscouting.dart';
 import 'package:app/models/2026Pitscouting.dart';
 import 'package:app/models/follow_up.dart';
 import 'package:app/models/group_events.dart';
+import 'package:app/models/global_ranking.dart';
 import 'package:app/models/match_prediction.dart';
 import 'package:app/models/team_stat.dart';
 import 'package:app/models/team_stats.dart';
@@ -54,6 +55,27 @@ class APIService {
     this.baseUrl = defaultBaseUrl,
     http.Client? client,
   }) : _client = client ?? http.Client();
+
+  Future<GlobalRankingPage> fetchGlobalRankings({
+    int offset = 0,
+    String query = '',
+    String? snapshot,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rankings/global').replace(queryParameters: {
+      'offset': '$offset',
+      'limit': '50',
+      if (query.trim().isNotEmpty) 'q': query.trim(),
+      if (snapshot != null) 'snapshot': snapshot,
+    });
+    final response = await _client.get(uri,
+        headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 30));
+    if (response.statusCode == 410) throw RankingSnapshotExpired();
+    if (response.statusCode != 200) {
+      throw Exception('Could not load global rankings (${response.statusCode}).');
+    }
+    return GlobalRankingPage.fromJson(
+        Map<String, dynamic>.from(jsonDecode(response.body) as Map));
+  }
 
   Future<List<Stats2026>> fetchStatsByEvent(
     String eventKey, {

@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import numpy as np
 
+from analysis.analysis import OPR
 from tba_client import get_tba_json
 
 PREDICTABLE_MATCH_LEVELS = {
@@ -134,72 +135,13 @@ def match_sort_key(match: dict) -> tuple:
 def fit_opr_from_completed_matches(
     completed_matches: list[dict],
 ) -> dict[int, float]:
-    """
-    Fit OPR values from a list of completed qualification matches.
-
-    Each alliance creates one matrix row, and the alliance's actual
-    score becomes the target value for that row.
-    """
-
-    teams = set()
-
+    """Use the same unchanged event OPR calculator for prediction inputs."""
+    opr = OPR()
     for match in completed_matches:
-        teams.update(get_alliance_teams(match, "red"))
-        teams.update(get_alliance_teams(match, "blue"))
-
-    sorted_teams = sorted(teams)
-
-    if not sorted_teams:
-        return {}
-
-    team_index = {
-        team: index
-        for index, team in enumerate(sorted_teams)
-    }
-
-    rows = []
-    scores = []
-
-    for match in completed_matches:
-        for color in ("red", "blue"):
-            alliance_teams = get_alliance_teams(match, color)
-            alliance_score = get_alliance_score(match, color)
-
-            if not alliance_teams or alliance_score is None:
-                continue
-
-            row = np.zeros(len(sorted_teams), dtype=float)
-
-            for team in alliance_teams:
-                index = team_index.get(team)
-
-                if index is not None:
-                    row[index] = 1.0
-
-            rows.append(row)
-            scores.append(alliance_score)
-
-    if not rows:
-        return {}
-
-    alliance_matrix = np.asarray(rows, dtype=float)
-    score_vector = np.asarray(scores, dtype=float)
-
-    try:
-        opr_values = np.linalg.lstsq(
-            alliance_matrix,
-            score_vector,
-            rcond=None,
-        )[0]
-    except np.linalg.LinAlgError as error:
-        raise RuntimeError(
-            "Unable to calculate OPR because the alliance matrix "
-            "could not be solved."
-        ) from error
-
+        opr.addMatch(match)
     return {
-        team: float(max(0.0, opr_values[index]))
-        for team, index in team_index.items()
+        int(team): values["totalOPR"]
+        for team, values in opr.calculate().items()
     }
 
 

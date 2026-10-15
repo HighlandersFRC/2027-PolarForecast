@@ -17,7 +17,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Polar Forecast'), findsOneWidget);
-    expect(find.text('Look up any team'), findsOneWidget);
-    expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+    expect(find.text('Global rankings'), findsNothing);
+    expect(find.byType(TextField), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

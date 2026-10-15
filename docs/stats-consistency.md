@@ -5,7 +5,7 @@
 Three code paths could leave devices showing different numbers:
 
 1. The event table requested `/{event}/stats?username=...`, which can use
-   scouting-adjusted `GroupStats`. The team detail page omitted the username
+   scouting-enriched `GroupStats`. The team detail page omitted the username
    and read public `Stats` directly. Opening the same team through different
    pages could therefore show different OPR and scoring components.
 2. The team page fetched once when it opened. The event page refreshed only
@@ -31,19 +31,50 @@ devices' requests, we cannot say which one caused a particular reported mismatch
   an error rather than silently presenting old numbers as current.
 - Successful refreshes keep the existing view in place while loading. The
   event page preserves an active match-scouting draft during stats refreshes.
+- Saving match scouting immediately requests fresh event stats and discards any
+  request started before the save. Returning to the Stats tab also refreshes.
+  The scouting form receives the same full event key as the stats request.
+  Saved reports invalidate the group's previous stats cache before rebuilding,
+  so a failed immediate rebuild is retried on the next stats request.
 - API responses use `Cache-Control: no-store`. Nginx uses `no-cache`, which
   makes browsers revalidate frontend files. Docker builds disable the generated
   offline-first worker and serve a retirement worker at the old URL.
 
-Polling reads the existing MongoDB cache; it does not recalculate OPR or contact
-TBA on every device request. New TBA results still depend on backend updates.
+Polling reads the existing MongoDB cache. A cache from an older calculation
+version is rebuilt once from stored TBA matches before responding; normal
+requests do not recalculate OPR or contact TBA. New TBA results still depend on backend updates.
 Two requests made on opposite sides of a server update may briefly differ;
 healthy connected pages converge on their next successful refresh.
 
-Different groups, and signed-in versus signed-out users, can intentionally have
-different stats. Group stats include that group's scouting data. Public stats
-use TBA data. A user without an applicable group cache falls back to public
-stats. Compare the same event/year and account when checking consistency.
+All stats use `API/analysis/analysis.py` without modifying its `OPR` class.
+Its public `autoOPR`, `teleopOPR`, `towerOPR`, and `totalOPR` values are preserved,
+including precision and negative coefficients. `API/analysis/event_stats.py`
+prepares the API rows from that calculator, and the API saves public results to
+`Stats`. Scouting helpers live in `API/analysis/scouting.py`. Predictions also
+use the original calculator.
+Group stats conservatively fuse that group's scouting fuel
+with the TBA fuel components, using the same alliance matrix for the TBA fuel
+estimates. For each phase, the scouting weight is `0.30 * scouted / played`,
+capped at 30%. Only distinct, completed qualification matches with the robot
+on that alliance count; duplicate reports are averaged within their match.
+Missing/invalid observations, playoffs, and upcoming matches do not contribute.
+If TBA lacks the phase's fuel breakdown, that phase keeps its original value.
+The fuel correction updates Auto, Teleop, and total OPR while preserving tower
+and other non-fuel scoring. Teams without eligible observations retain their
+original TBA OPR. `ScoutingFusion` records the weights and eligible match counts.
+Group stats also include scouting summaries, death/defense rates, and comments.
+Missing or outdated group caches are rebuilt before event/team responses. A user
+without an applicable group/event falls back to public stats. Signed-in event
+tables and team main pages display scouting analysis alongside TBA metrics;
+signed-out views show TBA metrics only.
+
+Cumulative OPR calculations and TBA history screens remain removed. Team pages
+show per-match auto, teleop, and total fuel history using only the signed-in
+group's match-scouting reports. Incomplete reports and invalid legacy counts
+are omitted; multiple complete reports for one match use their mean rather
+than summing the same robot performance. The current OPR comparison chart and
+individual scouting entries remain available. The app reads the calculator's
+original JSON metric names and labels the tower component as Tower.
 
 ## Deploying this fix
 
@@ -107,7 +138,7 @@ TBA returns HTTP 304. Group stats are rebuilt separately by the updater.
 From `API`:
 
 ```sh
-python -m unittest tests.test_stats_consistency tests.test_routes tests.test_linreg tests.test_tba_client -v
+python -m unittest tests.test_stats_consistency tests.test_routes tests.test_analysis tests.test_tba_client -v
 ```
 
 From `APP`:

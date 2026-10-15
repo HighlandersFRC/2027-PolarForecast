@@ -1,4 +1,4 @@
-import 'package:app/models/2026StatsModel.dart';
+import 'package:app/models/team_stat.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'team_stats.freezed.dart';
@@ -9,7 +9,7 @@ class TeamStats with _$TeamStats {
   const factory TeamStats({
     required String event,
     required int team,
-    required Stats2026 stats,
+    required TeamStat stats,
   }) = _TeamStats;
 
   factory TeamStats.fromJson(Map<String, dynamic> json) =>

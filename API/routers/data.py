@@ -12,6 +12,7 @@ class DataDependencies:
     group_stats_collection: Any
     cache_status_collection: Any
     year: str
+    group_stats_cache_version: int
     get_stats_from_db: Callable[..., Any]
     require_username_group_member: Callable[..., Any]
     rebuild_group_stats: Callable[..., Any]
@@ -116,7 +117,7 @@ def create_data_router(dependencies: DataDependencies) -> APIRouter:
             {"_id": 0},
         )
 
-        if document is None:
+        if document is None or document.get("cache_version") != dependencies.group_stats_cache_version:
             dependencies.rebuild_group_stats(group_id, event)
             document = dependencies.group_stats_collection.find_one(
                 query,
@@ -146,10 +147,10 @@ def create_data_router(dependencies: DataDependencies) -> APIRouter:
         query = {"group_id": group_id, "event_key": event}
         document = dependencies.group_stats_collection.find_one(
             query,
-            {"_id": 0, "data": 1},
+            {"_id": 0, "data": 1, "cache_version": 1},
         )
 
-        if document is None:
+        if document is None or document.get("cache_version") != dependencies.group_stats_cache_version:
             dependencies.rebuild_group_stats(group_id, event)
             document = dependencies.group_stats_collection.find_one(
                 query,

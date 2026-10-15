@@ -612,12 +612,9 @@ class _PicklistsPageState extends State<PicklistsPage> {
           'OPR',
           'AutoFuel',
           'TeleopFuel',
-          'AutoFuelOPR',
-          'TeleopFuelOPR',
           'Auto',
           'Teleop',
-          'Endgame',
-          'Climb',
+          'Tower',
           'DefenseRate',
           'DefenseCount',
           'DeathRate',
@@ -635,12 +632,9 @@ class _PicklistsPageState extends State<PicklistsPage> {
               stats?.OPR,
               stats?.AverageAutoFuel,
               stats?.AverageTeleopFuel,
-              stats?.AutoFuelOPR,
-              stats?.TeleopFuelOPR,
               stats?.Auto,
               stats?.Teleop,
-              stats?.Endgame,
-              stats?.Climb,
+              stats?.Tower,
               stats?.DefenseRate,
               stats?.DefenseCount,
               stats?.DeathRate,
@@ -1003,8 +997,8 @@ class _PicklistsPageState extends State<PicklistsPage> {
                                   color: Colors.orangeAccent),
                               if (!compact)
                                 _StatPill(
-                                    label: 'Endgame',
-                                    value: _formatStat(stats.Endgame),
+                                    label: 'Tower',
+                                    value: _formatStat(stats.Tower),
                                     color: const Color(0xFFFFD781)),
                               if (!compact)
                                 _StatPill(

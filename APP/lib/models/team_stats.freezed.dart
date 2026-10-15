@@ -22,7 +22,7 @@ TeamStats _$TeamStatsFromJson(Map<String, dynamic> json) {
 mixin _$TeamStats {
   String get event => throw _privateConstructorUsedError;
   int get team => throw _privateConstructorUsedError;
-  Stats2026 get stats => throw _privateConstructorUsedError;
+  TeamStat get stats => throw _privateConstructorUsedError;
 
   /// Serializes this TeamStats to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -39,9 +39,9 @@ abstract class $TeamStatsCopyWith<$Res> {
   factory $TeamStatsCopyWith(TeamStats value, $Res Function(TeamStats) then) =
       _$TeamStatsCopyWithImpl<$Res, TeamStats>;
   @useResult
-  $Res call({String event, int team, Stats2026 stats});
+  $Res call({String event, int team, TeamStat stats});
 
-  $Stats2026CopyWith<$Res> get stats;
+  $TeamStatCopyWith<$Res> get stats;
 }
 
 /// @nodoc
@@ -75,7 +75,7 @@ class _$TeamStatsCopyWithImpl<$Res, $Val extends TeamStats>
       stats: null == stats
           ? _value.stats
           : stats // ignore: cast_nullable_to_non_nullable
-              as Stats2026,
+              as TeamStat,
     ) as $Val);
   }
 
@@ -83,8 +83,8 @@ class _$TeamStatsCopyWithImpl<$Res, $Val extends TeamStats>
   /// with the given fields replaced by the non-null parameter values.
   @override
   @pragma('vm:prefer-inline')
-  $Stats2026CopyWith<$Res> get stats {
-    return $Stats2026CopyWith<$Res>(_value.stats, (value) {
+  $TeamStatCopyWith<$Res> get stats {
+    return $TeamStatCopyWith<$Res>(_value.stats, (value) {
       return _then(_value.copyWith(stats: value) as $Val);
     });
   }
@@ -98,10 +98,10 @@ abstract class _$$TeamStatsImplCopyWith<$Res>
       __$$TeamStatsImplCopyWithImpl<$Res>;
   @override
   @useResult
-  $Res call({String event, int team, Stats2026 stats});
+  $Res call({String event, int team, TeamStat stats});
 
   @override
-  $Stats2026CopyWith<$Res> get stats;
+  $TeamStatCopyWith<$Res> get stats;
 }
 
 /// @nodoc
@@ -133,7 +133,7 @@ class __$$TeamStatsImplCopyWithImpl<$Res>
       stats: null == stats
           ? _value.stats
           : stats // ignore: cast_nullable_to_non_nullable
-              as Stats2026,
+              as TeamStat,
     ));
   }
 }
@@ -152,7 +152,7 @@ class _$TeamStatsImpl implements _TeamStats {
   @override
   final int team;
   @override
-  final Stats2026 stats;
+  final TeamStat stats;
 
   @override
   String toString() {
@@ -193,7 +193,7 @@ abstract class _TeamStats implements TeamStats {
   const factory _TeamStats(
       {required final String event,
       required final int team,
-      required final Stats2026 stats}) = _$TeamStatsImpl;
+      required final TeamStat stats}) = _$TeamStatsImpl;
 
   factory _TeamStats.fromJson(Map<String, dynamic> json) =
       _$TeamStatsImpl.fromJson;
@@ -203,7 +203,7 @@ abstract class _TeamStats implements TeamStats {
   @override
   int get team;
   @override
-  Stats2026 get stats;
+  TeamStat get stats;
 
   /// Create a copy of TeamStats
   /// with the given fields replaced by the non-null parameter values.

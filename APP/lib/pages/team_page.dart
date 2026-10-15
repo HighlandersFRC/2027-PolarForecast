@@ -8,7 +8,7 @@ import 'package:app/services/live_data_controller.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/DataSourceBanner.dart';
 import 'package:app/widgets/matte_theme.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:app/widgets/scouting_score_history.dart';
 import 'package:flutter/material.dart';
 
 class TeamPage extends StatefulWidget {
@@ -188,7 +188,10 @@ class _TeamPageState extends State<TeamPage> {
       floatingActionButton: _index == 0
           ? FloatingActionButton.small(
               tooltip: 'Refresh team stats',
-              onPressed: () => _stats.refresh(),
+              onPressed: () {
+                setState(_loadScouting);
+                _stats.refresh();
+              },
               child: const Icon(Icons.refresh),
             )
           : null,
@@ -322,20 +325,6 @@ class _TeamPageState extends State<TeamPage> {
         final team = snapshot.data!;
         final teamStats = team.stats;
 
-        final history = List<TeamMatchHistory>.from(
-          teamStats.MatchHistory,
-        )..sort(
-            (a, b) => _historySortValue(a).compareTo(
-              _historySortValue(b),
-            ),
-          );
-
-        final firstOpr = history.isNotEmpty ? history.first.OPR : teamStats.OPR;
-
-        final latestOpr = history.isNotEmpty ? history.last.OPR : teamStats.OPR;
-
-        final oprChange = latestOpr - firstOpr;
-
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
           children: [
@@ -343,9 +332,7 @@ class _TeamPageState extends State<TeamPage> {
               teamNumber: team.team,
               rank: teamStats.Rank,
               opr: teamStats.OPR,
-              oprChange: oprChange,
-              matchesPlayed:
-                  history.isNotEmpty ? history.last.MatchesPlayed : 0,
+              matchesPlayed: teamStats.MatchesPlayed,
             ),
             const SizedBox(height: 14),
             _buildStatsFieldAccessCard(),
@@ -353,7 +340,7 @@ class _TeamPageState extends State<TeamPage> {
             LayoutBuilder(
               builder: (context, constraints) {
                 final columns = constraints.maxWidth >= 950
-                    ? 5
+                    ? 4
                     : constraints.maxWidth >= 600
                         ? 3
                         : 2;
@@ -397,34 +384,109 @@ class _TeamPageState extends State<TeamPage> {
                     SizedBox(
                       width: cardWidth,
                       child: _buildStatMetricCard(
-                        title: 'Endgame',
-                        value: teamStats.Endgame,
+                        title: 'Tower',
+                        value: teamStats.Tower,
                         icon: Icons.flag_rounded,
                         color: const Color(0xFFB388FF),
-                      ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _buildStatMetricCard(
-                        title: 'Climb',
-                        value: teamStats.Climb,
-                        icon: Icons.vertical_align_top_rounded,
-                        color: const Color(0xFFFF7188),
                       ),
                     ),
                   ],
                 );
               },
             ),
-            const SizedBox(height: 14),
-            _buildOprHistoryCard(history),
-            if (history.isNotEmpty) ...[
+            if (widget.username.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
-              _buildMatchHistoryList(history),
+              _buildScoutingAnalysis(teamStats),
+              if (widget.groupId.trim().isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _buildScoutingHistory(),
+              ],
             ],
           ],
         );
       },
+    );
+  }
+
+  Widget _buildScoutingHistory() {
+    return FutureBuilder<List<dynamic>>(
+      future: _futureScouting,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        if (snapshot.hasError) {
+          return const Text('Scouting history could not be loaded.',
+              style: TextStyle(color: Colors.white54));
+        }
+        return _scoutingHistoryChart((snapshot.data ?? [])
+            .whereType<Map>()
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList());
+      },
+    );
+  }
+
+  Widget _scoutingHistoryChart(List<Map<String, dynamic>> entries) =>
+      ScoutingScoreHistory(
+        entries: entries,
+        event: widget.eventCode,
+        team: widget.team,
+        groupId: widget.groupId,
+      );
+
+  Widget _buildScoutingAnalysis(TeamStat stats) {
+    return _TeamCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Match scouting analysis',
+            style: TextStyle(color: text, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${stats.ScoutedMatches} scouted matches • ${stats.ScoutEntries} entries',
+            style: const TextStyle(color: Colors.white54),
+          ),
+          if (stats.ScoutEntries > 0) ...[
+            const SizedBox(height: 12),
+            LayoutBuilder(builder: (context, constraints) {
+              final width = (constraints.maxWidth - 10) / 2;
+              final metrics = [
+                (
+                  'Death rate',
+                  '${(stats.DeathRate * 100).toStringAsFixed(0)}%',
+                  Icons.warning_amber_rounded
+                ),
+                (
+                  'Defense rate',
+                  '${(stats.DefenseRate * 100).toStringAsFixed(0)}%',
+                  Icons.shield_outlined
+                ),
+              ];
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final metric in metrics)
+                    SizedBox(
+                      width: width,
+                      child: _buildSummaryTile(
+                        label: metric.$1,
+                        value: metric.$2,
+                        icon: metric.$3,
+                        accent: const Color(0xFF47D7B0),
+                        compact: width < 140,
+                      ),
+                    ),
+                ],
+              );
+            }),
+          ],
+        ],
+      ),
     );
   }
 
@@ -618,24 +680,8 @@ class _TeamPageState extends State<TeamPage> {
     required int teamNumber,
     required int rank,
     required double opr,
-    required double oprChange,
     required int matchesPlayed,
   }) {
-    final isImproving = oprChange > 0;
-    final isDeclining = oprChange < 0;
-
-    final trendColor = isImproving
-        ? Colors.greenAccent
-        : isDeclining
-            ? Colors.redAccent
-            : Colors.white54;
-
-    final trendIcon = isImproving
-        ? Icons.trending_up_rounded
-        : isDeclining
-            ? Icons.trending_down_rounded
-            : Icons.trending_flat_rounded;
-
     return _TeamCard(
       padding: const EdgeInsets.all(20),
       tint: const Color(0xFF69A7FF),
@@ -722,27 +768,6 @@ class _TeamPageState extends State<TeamPage> {
                     fontSize: 30,
                     fontWeight: FontWeight.w900,
                   ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      trendIcon,
-                      color: trendColor,
-                      size: 17,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      '${oprChange >= 0 ? '+' : ''}'
-                      '${oprChange.toStringAsFixed(1)} over event',
-                      style: TextStyle(
-                        color: trendColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -1184,616 +1209,12 @@ class _TeamPageState extends State<TeamPage> {
     );
   }
 
-  Widget _buildOprHistoryCard(
-    List<TeamMatchHistory> history,
-  ) {
-    const graphColor = Color(0xFF69A7FF);
-
-    if (history.isEmpty) {
-      return const _TeamCard(
-        padding: const EdgeInsets.all(24),
-        tint: graphColor,
-        radius: 18,
-        child: const Column(
-          children: [
-            Icon(
-              Icons.show_chart_rounded,
-              color: Colors.white24,
-              size: 42,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'No OPR history available',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            SizedBox(height: 4),
-            Text(
-              'The graph will appear as matches are played.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white38,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final spots = <FlSpot>[];
-
-    var minimumOpr = history.first.OPR;
-    var maximumOpr = history.first.OPR;
-
-    for (var index = 0; index < history.length; index++) {
-      final opr = history[index].OPR;
-
-      if (opr < minimumOpr) {
-        minimumOpr = opr;
-      }
-
-      if (opr > maximumOpr) {
-        maximumOpr = opr;
-      }
-
-      spots.add(
-        FlSpot(index.toDouble(), opr),
-      );
-    }
-
-    final range = maximumOpr - minimumOpr;
-    final padding = range == 0 ? (maximumOpr.abs() * 0.15) + 5 : range * 0.2;
-
-    final minimumY = minimumOpr < 0 ? minimumOpr - padding : 0.0;
-
-    final maximumY = maximumOpr + padding;
-
-    final horizontalInterval =
-        ((maximumY - minimumY) / 4).clamp(1.0, double.infinity).toDouble();
-
-    final matchLabelInterval =
-        history.length <= 7 ? 1 : (history.length / 7).ceil();
-
-    final lowestMatch = history.reduce(
-      (a, b) => a.OPR < b.OPR ? a : b,
-    );
-
-    final highestMatch = history.reduce(
-      (a, b) => a.OPR > b.OPR ? a : b,
-    );
-
-    return _TeamCard(
-      padding: const EdgeInsets.all(18),
-      tint: graphColor,
-      radius: 18,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'OPR History',
-            style: TextStyle(
-              color: text,
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Estimated contribution after each completed match',
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildHistorySummary(
-                  label: 'Starting',
-                  value: history.first.OPR,
-                  match: _shortHistoryMatchLabel(history.first),
-                  color: Colors.white70,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildHistorySummary(
-                  label: 'Highest',
-                  value: highestMatch.OPR,
-                  match: _shortHistoryMatchLabel(highestMatch),
-                  color: Colors.greenAccent,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildHistorySummary(
-                  label: 'Lowest',
-                  value: lowestMatch.OPR,
-                  match: _shortHistoryMatchLabel(lowestMatch),
-                  color: Colors.orangeAccent,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            height: 280,
-            child: LineChart(
-              LineChartData(
-                minX: 0,
-                maxX: history.length > 1 ? (history.length - 1).toDouble() : 1,
-                minY: minimumY,
-                maxY: maximumY,
-                clipData: const FlClipData.all(),
-                borderData: FlBorderData(show: false),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: horizontalInterval,
-                  getDrawingHorizontalLine: (_) {
-                    return const FlLine(
-                      color: Colors.white10,
-                      strokeWidth: 1,
-                    );
-                  },
-                ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 44,
-                      interval: horizontalInterval,
-                      getTitlesWidget: (value, meta) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            value.toStringAsFixed(0),
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 10,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      interval: 1,
-                      reservedSize: 36,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-
-                        if (index < 0 ||
-                            index >= history.length ||
-                            index % matchLabelInterval != 0) {
-                          return const SizedBox.shrink();
-                        }
-
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text(
-                            _shortHistoryMatchLabel(history[index]),
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                lineTouchData: LineTouchData(
-                  enabled: true,
-                  touchTooltipData: LineTouchTooltipData(
-                    tooltipBorderRadius: BorderRadius.circular(10),
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                        final index = spot.x.round();
-                        final match = history[index];
-
-                        return LineTooltipItem(
-                          '${_historyMatchLabel(match)}\n'
-                          'OPR ${spot.y.toStringAsFixed(1)}',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        );
-                      }).toList();
-                    },
-                  ),
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    curveSmoothness: 0.25,
-                    color: graphColor,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: history.length <= 18,
-                    ),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: graphColor.withOpacity(0.1),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistorySummary({
-    required String label,
-    required double value,
-    required String match,
-    required Color color,
-  }) {
-    return _TeamInset(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 11,
-      ),
-      tint: color,
-      radius: 12,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _formatStatValue(value),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            match,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 10,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMatchHistoryList(
-    List<TeamMatchHistory> history,
-  ) {
-    return _TeamCard(
-      tint: const Color(0xFF69A7FF),
-      radius: 18,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(18, 18, 18, 14),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.history_rounded,
-                  color: Color(0xFF8CBAFF),
-                  size: 20,
-                ),
-                SizedBox(width: 9),
-                Text(
-                  'Match History',
-                  style: TextStyle(
-                    color: text,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(
-            height: 1,
-            color: Colors.white10,
-          ),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: history.length,
-            separatorBuilder: (_, __) {
-              return const Divider(
-                height: 1,
-                indent: 18,
-                endIndent: 18,
-                color: Colors.white10,
-              );
-            },
-            itemBuilder: (context, index) {
-              final match = history[index];
-
-              final previousOpr =
-                  index > 0 ? history[index - 1].OPR : match.OPR;
-
-              final change = match.OPR - previousOpr;
-
-              final changeColor = change > 0
-                  ? Colors.greenAccent
-                  : change < 0
-                      ? Colors.redAccent
-                      : Colors.white38;
-
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 13,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF69A7FF).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(11),
-                      ),
-                      child: Text(
-                        _shortHistoryMatchLabel(match),
-                        maxLines: 1,
-                        style: const TextStyle(
-                          color: Color(0xFF9BC3FF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _historyMatchLabel(match),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${match.MatchesPlayed} matches played',
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          _formatStatValue(match.OPR),
-                          style: const TextStyle(
-                            color: text,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        if (index > 0)
-                          Text(
-                            '${change >= 0 ? '+' : ''}'
-                            '${change.toStringAsFixed(1)}',
-                            style: TextStyle(
-                              color: changeColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   String _formatStatValue(double value) {
     if (value == value.roundToDouble()) {
       return value.toInt().toString();
     }
 
     return value.toStringAsFixed(1);
-  }
-
-  int _historySortValue(TeamMatchHistory history) {
-    final compLevel = history.CompLevel?.toLowerCase().trim() ?? '';
-
-    if (compLevel == 'qm') {
-      return history.MatchNumber;
-    }
-
-    if (compLevel == 'sf') {
-      return 100000 + history.SetNumber * 100 + history.MatchNumber;
-    }
-
-    if (compLevel == 'f') {
-      return 200000 + history.MatchNumber;
-    }
-
-    final match = history.Match.toLowerCase();
-
-    final qualification = RegExp(r'qm(\d+)').firstMatch(match);
-
-    if (qualification != null) {
-      return int.tryParse(
-            qualification.group(1) ?? '',
-          ) ??
-          0;
-    }
-
-    final semifinal = RegExp(r'sf(\d+)(?:m(\d+))?').firstMatch(match);
-
-    if (semifinal != null) {
-      final setNumber = int.tryParse(
-            semifinal.group(1) ?? '',
-          ) ??
-          0;
-
-      final matchNumber = int.tryParse(
-            semifinal.group(2) ?? '',
-          ) ??
-          0;
-
-      return 100000 + setNumber * 100 + matchNumber;
-    }
-
-    final finalMatch = RegExp(r'(?:^|_)f(\d+)').firstMatch(match);
-
-    if (finalMatch != null) {
-      return 200000 +
-          (int.tryParse(
-                finalMatch.group(1) ?? '',
-              ) ??
-              0);
-    }
-
-    return 300000 + history.MatchNumber;
-  }
-
-  String _historyMatchLabel(TeamMatchHistory history) {
-    final compLevel = history.CompLevel?.toLowerCase().trim() ?? '';
-
-    if (compLevel == 'qm') {
-      return 'Qualification ${history.MatchNumber}';
-    }
-
-    if (compLevel == 'sf') {
-      if (history.SetNumber > 0) {
-        return 'Semi-Final ${history.SetNumber}-${history.MatchNumber}';
-      }
-
-      return 'Semi-Final ${history.MatchNumber}';
-    }
-
-    if (compLevel == 'f') {
-      return 'Final ${history.MatchNumber}';
-    }
-
-    final match = history.Match.toLowerCase();
-
-    final qualification = RegExp(r'qm(\d+)').firstMatch(match);
-
-    if (qualification != null) {
-      return 'Qualification ${qualification.group(1)}';
-    }
-
-    final semifinal = RegExp(r'sf(\d+)(?:m(\d+))?').firstMatch(match);
-
-    if (semifinal != null) {
-      final setNumber = semifinal.group(1);
-      final matchNumber = semifinal.group(2);
-
-      return matchNumber == null
-          ? 'Semi-Final $setNumber'
-          : 'Semi-Final $setNumber-$matchNumber';
-    }
-
-    final finalMatch = RegExp(r'(?:^|_)f(\d+)').firstMatch(match);
-
-    if (finalMatch != null) {
-      return 'Final ${finalMatch.group(1)}';
-    }
-
-    return history.Match;
-  }
-
-  String _shortHistoryMatchLabel(
-    TeamMatchHistory history,
-  ) {
-    final compLevel = history.CompLevel?.toLowerCase().trim() ?? '';
-
-    if (compLevel == 'qm') {
-      return 'Q${history.MatchNumber}';
-    }
-
-    if (compLevel == 'sf') {
-      if (history.SetNumber > 0) {
-        return 'SF${history.SetNumber}-${history.MatchNumber}';
-      }
-
-      return 'SF${history.MatchNumber}';
-    }
-
-    if (compLevel == 'f') {
-      return 'F${history.MatchNumber}';
-    }
-
-    final match = history.Match.toLowerCase();
-
-    final qualification = RegExp(r'qm(\d+)').firstMatch(match);
-
-    if (qualification != null) {
-      return 'Q${qualification.group(1)}';
-    }
-
-    final semifinal = RegExp(r'sf(\d+)(?:m(\d+))?').firstMatch(match);
-
-    if (semifinal != null) {
-      final setNumber = semifinal.group(1);
-      final matchNumber = semifinal.group(2);
-
-      return matchNumber == null ? 'SF$setNumber' : 'SF$setNumber-$matchNumber';
-    }
-
-    final finalMatch = RegExp(r'(?:^|_)f(\d+)').firstMatch(match);
-
-    if (finalMatch != null) {
-      return 'F${finalMatch.group(1)}';
-    }
-
-    return history.Match;
   }
 
   // =========================
@@ -1886,7 +1307,7 @@ class _TeamPageState extends State<TeamPage> {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
               sliver: SliverToBoxAdapter(
-                child: _buildScoutingTrendCard(scoutingEntries),
+                child: _scoutingHistoryChart(scoutingEntries),
               ),
             ),
             SliverPadding(
@@ -1923,302 +1344,6 @@ class _TeamPageState extends State<TeamPage> {
           ],
         );
       },
-    );
-  }
-
-  Widget _buildScoutingTrendCard(
-    List<Map<String, dynamic>> scoutingEntries,
-  ) {
-    const autoColor = Color(0xFF67A4FF);
-    const teleopColor = Color(0xFF36D6B5);
-
-    final autoSpots = <FlSpot>[];
-    final teleopSpots = <FlSpot>[];
-
-    var totalAuto = 0.0;
-    var totalTeleop = 0.0;
-    var highestValue = 0.0;
-
-    for (var index = 0; index < scoutingEntries.length; index++) {
-      final entry = scoutingEntries[index];
-      final data = _asMap(entry['data']);
-      final auto = _asMap(data['autoScouting']);
-      final teleop = _asMap(data['teleopScouting']);
-
-      final autoFuel = _asDouble(auto['fuel_scored']);
-      final teleopFuel = _asDouble(teleop['fuel_scored']);
-
-      totalAuto += autoFuel;
-      totalTeleop += teleopFuel;
-
-      highestValue = math.max(
-        highestValue,
-        math.max(autoFuel, teleopFuel),
-      );
-
-      autoSpots.add(
-        FlSpot(index.toDouble(), autoFuel),
-      );
-
-      teleopSpots.add(
-        FlSpot(index.toDouble(), teleopFuel),
-      );
-    }
-
-    final averageAuto = totalAuto / scoutingEntries.length;
-    final averageTeleop = totalTeleop / scoutingEntries.length;
-
-    final chartMaxY = math.max(
-      10.0,
-      (highestValue * 1.2).ceilToDouble(),
-    );
-
-    final horizontalInterval = math.max(
-      1.0,
-      (chartMaxY / 4).ceilToDouble(),
-    );
-
-    final labelInterval = math.max(
-      1,
-      (scoutingEntries.length / 7).ceil(),
-    );
-
-    return _TeamCard(
-      tint: teleopColor,
-      radius: 18,
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 16,
-              runSpacing: 12,
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Performance Over Time',
-                      style: TextStyle(
-                        color: text,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Auto and teleop fuel scored by match',
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _buildLegendItem(
-                      label: 'Auto',
-                      color: autoColor,
-                    ),
-                    _buildLegendItem(
-                      label: 'Teleop',
-                      color: teleopColor,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 600;
-
-                return Row(
-                  children: [
-                    Expanded(
-                      child: _buildSummaryTile(
-                        icon: Icons.sports_score_rounded,
-                        label: 'Matches',
-                        value: scoutingEntries.length.toString(),
-                        accent: Colors.white70,
-                        compact: compact,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _buildSummaryTile(
-                        icon: Icons.bolt_rounded,
-                        label: 'Avg. Auto',
-                        value: averageAuto.toStringAsFixed(1),
-                        accent: autoColor,
-                        compact: compact,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _buildSummaryTile(
-                        icon: Icons.speed_rounded,
-                        label: 'Avg. Teleop',
-                        value: averageTeleop.toStringAsFixed(1),
-                        accent: teleopColor,
-                        compact: compact,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 280,
-              child: LineChart(
-                LineChartData(
-                  minX: 0,
-                  maxX: math
-                      .max(
-                        1,
-                        scoutingEntries.length - 1,
-                      )
-                      .toDouble(),
-                  minY: 0,
-                  maxY: chartMaxY,
-                  clipData: const FlClipData.all(),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: horizontalInterval,
-                    getDrawingHorizontalLine: (_) {
-                      return const FlLine(
-                        color: Colors.white10,
-                        strokeWidth: 1,
-                      );
-                    },
-                  ),
-                  borderData: FlBorderData(show: false),
-                  lineTouchData: LineTouchData(
-                    enabled: true,
-                    touchTooltipData: LineTouchTooltipData(
-                      tooltipBorderRadius: BorderRadius.circular(10),
-                      getTooltipItems: (spots) {
-                        return spots.map((spot) {
-                          final label = spot.barIndex == 0 ? 'Auto' : 'Teleop';
-
-                          final color =
-                              spot.barIndex == 0 ? autoColor : teleopColor;
-
-                          return LineTooltipItem(
-                            '$label: ${spot.y.toStringAsFixed(0)}',
-                            TextStyle(
-                              color: color,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          );
-                        }).toList();
-                      },
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 42,
-                        interval: horizontalInterval,
-                        getTitlesWidget: (value, meta) {
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Text(
-                              value.toStringAsFixed(0),
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                color: Colors.white38,
-                                fontSize: 11,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 34,
-                        interval: 1,
-                        getTitlesWidget: (value, meta) {
-                          final index = value.round();
-
-                          if (index < 0 ||
-                              index >= scoutingEntries.length ||
-                              index % labelInterval != 0) {
-                            return const SizedBox.shrink();
-                          }
-
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Text(
-                              _shortMatchName(
-                                scoutingEntries[index]['match'],
-                              ),
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: autoSpots,
-                      isCurved: true,
-                      curveSmoothness: 0.25,
-                      color: autoColor,
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      dotData: FlDotData(
-                        show: scoutingEntries.length <= 15,
-                      ),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: autoColor.withOpacity(0.08),
-                      ),
-                    ),
-                    LineChartBarData(
-                      spots: teleopSpots,
-                      isCurved: true,
-                      curveSmoothness: 0.25,
-                      color: teleopColor,
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      dotData: FlDotData(
-                        show: scoutingEntries.length <= 15,
-                      ),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: teleopColor.withOpacity(0.08),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2542,42 +1667,6 @@ class _TeamPageState extends State<TeamPage> {
     );
   }
 
-  Widget _buildLegendItem({
-    required String label,
-    required Color color,
-  }) {
-    return _TeamInset(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 7,
-      ),
-      tint: color,
-      radius: 20,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatusChip({
     required IconData icon,
     required String label,
@@ -2674,33 +1763,6 @@ class _TeamPageState extends State<TeamPage> {
     }
 
     return 'Match ${value ?? 'Unknown'}';
-  }
-
-  String _shortMatchName(dynamic value) {
-    final rawMatch = value?.toString().toLowerCase() ?? '';
-
-    final qualificationMatch = RegExp(r'qm(\d+)').firstMatch(rawMatch);
-
-    if (qualificationMatch != null) {
-      return 'Q${qualificationMatch.group(1)}';
-    }
-
-    final semifinalMatch = RegExp(r'sf(\d+)(?:m(\d+))?').firstMatch(rawMatch);
-
-    if (semifinalMatch != null) {
-      final setNumber = semifinalMatch.group(1);
-      final matchNumber = semifinalMatch.group(2);
-
-      return matchNumber == null ? 'SF$setNumber' : 'SF$setNumber-$matchNumber';
-    }
-
-    final finalMatch = RegExp(r'(?:^|_)f(\d+)').firstMatch(rawMatch);
-
-    if (finalMatch != null) {
-      return 'F${finalMatch.group(1)}';
-    }
-
-    return value?.toString() ?? '';
   }
 
   int _matchSortValue(dynamic value) {

@@ -10,7 +10,7 @@ _$TeamStatsImpl _$$TeamStatsImplFromJson(Map<String, dynamic> json) =>
     _$TeamStatsImpl(
       event: json['event'] as String,
       team: (json['team'] as num).toInt(),
-      stats: Stats2026.fromJson(json['stats'] as Map<String, dynamic>),
+      stats: TeamStat.fromJson(json['stats'] as Map<String, dynamic>),
     );
 
 Map<String, dynamic> _$$TeamStatsImplToJson(_$TeamStatsImpl instance) =>

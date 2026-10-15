@@ -9,7 +9,7 @@ from uuid import uuid4
 from bson import ObjectId
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import HTTPException, Response
+from fastapi import HTTPException, Query, Response
 from pymongo import MongoClient
 import requests
 from datetime import datetime, timedelta, timezone
@@ -21,7 +21,8 @@ from models.pit_scouting import Pitscouting
 from models.follow_ups import FollowUp
 from models.picklist import PicklistCreate, PicklistUpdate
 from models.robot_image import RobotImageUpload
-from LinReg import linreg, linreg_TBA
+from analysis.event_stats import calculate_event_stats
+from global_rankings import GlobalRankings, RankingSnapshotExpired
 from Predictions import predict as predict_matches
 from config import (
     ALLOW_ORIGINS,
@@ -55,10 +56,10 @@ YEAR = "2026"
 
 CACHE_UPDATE_INTERVAL_SECONDS = 300
 
-PREDICTION_CACHE_VERSION = 4
+PREDICTION_CACHE_VERSION = 5
 
-STATS_CACHE_VERSION = 4
-GROUP_STATS_CACHE_VERSION = 3
+STATS_CACHE_VERSION = 5
+GROUP_STATS_CACHE_VERSION = 5
 tags_metadata = [
     {
         "name": "default",
@@ -123,6 +124,11 @@ GroupPitStatus = db["GroupPitScoutingStatus"]
 FollowUpCollection = db["2026FollowUps"]
 PicklistCollection = db["Picklists"]
 RobotImagesCollection = db["RobotImages"]
+
+global_rankings = GlobalRankings(
+    StatsCollection, EventsCollection, ETagsCollection, get_tba_json,
+    YEAR, STATS_CACHE_VERSION,
+)
 
 
 cache_update_lock = Lock()
@@ -237,6 +243,19 @@ def get_team_media(team: int, year: int = 2026):
         } else 1
     )
     return {"team": team, "year": year, "media": normalized}
+
+
+@app.get('/rankings/global', tags=['stats'])
+def get_global_rankings(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=50),
+    q: str = Query(default="", max_length=100),
+    snapshot: str | None = Query(default=None, max_length=64),
+):
+    try:
+        return global_rankings.page(offset, limit, q, snapshot)
+    except RankingSnapshotExpired as error:
+        raise HTTPException(status_code=410, detail="Rankings updated; reload the first page") from error
 
 
 @app.get('/teams/{team}/identity', tags=['stats'])
@@ -482,6 +501,12 @@ def post_match_scouting(scouting_data: MatchScouting):
     document["submitted_at"] = now_utc()
 
     result = MatchScoutingCollection.insert_one(document)
+    # A saved report makes the previous group calculation stale even if the
+    # immediate rebuild fails. The next stats request must retry that rebuild.
+    GroupStatsCollection.update_one(
+        {"group_id": group_id, "event_key": event},
+        {"$unset": {"cache_version": ""}},
+    )
     robot_died = match_scouting_robot_died(document)
 
     pit_status = None
@@ -1047,7 +1072,7 @@ def _picklist_team_order(
             rank = _safe_picklist_number(stats.get("Rank"))
             return (rank is None or rank <= 0, rank or 0, team)
         if sort_by == "opr":
-            opr = _safe_picklist_number(stats.get("OPR"))
+            opr = _safe_picklist_number(stats.get("totalOPR"))
             return (opr is None, -(opr or 0), team)
         if sort_by == "defense":
             defense_rate = _safe_picklist_number(
@@ -2230,11 +2255,10 @@ def rebuild_group_stats(
     )
     members, _, _ = get_group_member_identity_sets(group_id)
 
-    stats_data = linreg(
-        TBAdata=matches,
-        Scoutdata=scout_data,
+    stats_data = calculate_event_stats(
         matches=matches,
         rankings_data=rankings_data,
+        scouting_data=scout_data,
     )
 
     save_group_stats(
@@ -2616,12 +2640,11 @@ def build_and_save_event(event: str, matches, rankings_data):
 
     save_tba_matches(event, matches)
 
-    stats_data = linreg_TBA(
-        event,
+    stats_data = save_stats(
+        event=event,
         matches=matches,
         rankings_data=rankings_data,
     )
-    save_event_stats(event, stats_data)
 
     predictions_data = refresh_event_predictions(event, matches)
 
@@ -2737,13 +2760,9 @@ def update_event_cache(event_document):
     )
 
     if stats_data:
-        first_team = stats_data[0]
-
         print(
             f"Rebuilt stats for {event_key}: "
-            f"{len(stats_data)} teams, "
-            f"MatchHistory present: "
-            f"{'MatchHistory' in first_team}"
+            f"{len(stats_data)} teams"
         )
 
     updates = {
@@ -3004,17 +3023,7 @@ def get_stats_from_db(
     event: str,
     username: str | None = None,
 ):
-    """
-    Returns group-specific stats when:
-
-    1. A username was provided.
-    2. The user belongs to a group.
-    3. That group has the requested event.
-    4. GroupStats contains non-empty data for that event.
-
-    Otherwise, returns the regular event stats.
-    """
-
+    """Read group scouting analysis when available, otherwise public stats."""
     if username:
         username = username.strip()
 
@@ -3051,27 +3060,48 @@ def get_stats_from_db(
                         {
                             "_id": 0,
                             "data": 1,
+                            "cache_version": 1,
                         },
                     )
                 )
 
-                if group_stats_document:
-                    group_stats = (
-                        group_stats_document.get("data")
-                    )
+                if (
+                    group_stats_document is None
+                    or group_stats_document.get("cache_version")
+                    != GROUP_STATS_CACHE_VERSION
+                ):
+                    group_stats = rebuild_group_stats(group_id, event)
+                else:
+                    group_stats = group_stats_document.get("data")
 
-                    if (
-                        isinstance(group_stats, list)
-                        and len(group_stats) > 0
-                    ):
-                        return group_stats
+                if isinstance(group_stats, list) and group_stats:
+                    return group_stats
 
-    return collection_data(
-        StatsCollection,
-        {
-            "event_key": event,
-        },
+    stats_document = StatsCollection.find_one(
+        {"event_key": event},
+        {"_id": 0, "data": 1, "cache_version": 1},
     )
+    if stats_document is None:
+        return None
+    if stats_document.get("cache_version") != STATS_CACHE_VERSION:
+        return save_stats(event)
+    return stats_document.get("data")
+
+
+def save_stats(event: str, matches=None, rankings_data=None):
+    if matches is None or rankings_data is None:
+        cached_matches, cached_rankings = get_cached_event_analysis_inputs(event)
+        if matches is None:
+            matches = cached_matches
+        if rankings_data is None:
+            rankings_data = cached_rankings
+
+    stats_data = calculate_event_stats(
+        matches=matches,
+        rankings_data=rankings_data,
+    )
+    save_event_stats(event, stats_data)
+    return stats_data
 
 
 def get_group_stats_from_db(group_id: str, event: str):
@@ -3124,6 +3154,7 @@ app.include_router(create_data_router(DataDependencies(
     group_stats_collection=GroupStatsCollection,
     cache_status_collection=CacheStatusCollection,
     year=YEAR,
+    group_stats_cache_version=GROUP_STATS_CACHE_VERSION,
     get_stats_from_db=get_stats_from_db,
     require_username_group_member=require_username_group_member,
     rebuild_group_stats=rebuild_group_stats,

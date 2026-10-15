@@ -9,7 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 class MatchScouting extends StatefulWidget {
-  const MatchScouting({super.key});
+  final String event;
+  final VoidCallback? onSubmitted;
+
+  const MatchScouting({super.key, required this.event, this.onSubmitted});
 
   @override
   State<MatchScouting> createState() => _MatchScoutingState();
@@ -42,12 +45,7 @@ class _MatchScoutingState extends State<MatchScouting> {
     'Went Over Right Bump',
     'Went Under Right Trench',
   };
-  final uri = Uri.base;
-
-  String get rawEvent =>
-      uri.pathSegments.isNotEmpty ? uri.pathSegments.last : "";
-
-  String get eventCode => rawEvent;
+  String get eventCode => widget.event;
 
   final _formKey = GlobalKey<FormState>();
 
@@ -298,6 +296,8 @@ class _MatchScoutingState extends State<MatchScouting> {
       await api.submitMatchScouting(report);
 
       if (!mounted) return;
+
+      widget.onSubmitted?.call();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

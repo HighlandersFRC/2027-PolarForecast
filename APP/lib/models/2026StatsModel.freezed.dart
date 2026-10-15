@@ -22,12 +22,14 @@ Stats2026 _$Stats2026FromJson(Map<String, dynamic> json) {
 mixin _$Stats2026 {
   int get Team => throw _privateConstructorUsedError;
   int get Rank => throw _privateConstructorUsedError;
+  @JsonKey(name: 'totalOPR')
   double get OPR => throw _privateConstructorUsedError;
+  @JsonKey(name: 'autoOPR')
   double get Auto => throw _privateConstructorUsedError;
+  @JsonKey(name: 'teleopOPR')
   double get Teleop => throw _privateConstructorUsedError;
-  double get Endgame => throw _privateConstructorUsedError;
-  double get Climb => throw _privateConstructorUsedError;
-  List<TeamMatchHistory> get MatchHistory => throw _privateConstructorUsedError;
+  @JsonKey(name: 'towerOPR')
+  double get Tower => throw _privateConstructorUsedError;
 
   /// Serializes this Stats2026 to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -47,12 +49,10 @@ abstract class $Stats2026CopyWith<$Res> {
   $Res call(
       {int Team,
       int Rank,
-      double OPR,
-      double Auto,
-      double Teleop,
-      double Endgame,
-      double Climb,
-      List<TeamMatchHistory> MatchHistory});
+      @JsonKey(name: 'totalOPR') double OPR,
+      @JsonKey(name: 'autoOPR') double Auto,
+      @JsonKey(name: 'teleopOPR') double Teleop,
+      @JsonKey(name: 'towerOPR') double Tower});
 }
 
 /// @nodoc
@@ -75,9 +75,7 @@ class _$Stats2026CopyWithImpl<$Res, $Val extends Stats2026>
     Object? OPR = null,
     Object? Auto = null,
     Object? Teleop = null,
-    Object? Endgame = null,
-    Object? Climb = null,
-    Object? MatchHistory = null,
+    Object? Tower = null,
   }) {
     return _then(_value.copyWith(
       Team: null == Team
@@ -100,18 +98,10 @@ class _$Stats2026CopyWithImpl<$Res, $Val extends Stats2026>
           ? _value.Teleop
           : Teleop // ignore: cast_nullable_to_non_nullable
               as double,
-      Endgame: null == Endgame
-          ? _value.Endgame
-          : Endgame // ignore: cast_nullable_to_non_nullable
+      Tower: null == Tower
+          ? _value.Tower
+          : Tower // ignore: cast_nullable_to_non_nullable
               as double,
-      Climb: null == Climb
-          ? _value.Climb
-          : Climb // ignore: cast_nullable_to_non_nullable
-              as double,
-      MatchHistory: null == MatchHistory
-          ? _value.MatchHistory
-          : MatchHistory // ignore: cast_nullable_to_non_nullable
-              as List<TeamMatchHistory>,
     ) as $Val);
   }
 }
@@ -127,12 +117,10 @@ abstract class _$$Stats2026ImplCopyWith<$Res>
   $Res call(
       {int Team,
       int Rank,
-      double OPR,
-      double Auto,
-      double Teleop,
-      double Endgame,
-      double Climb,
-      List<TeamMatchHistory> MatchHistory});
+      @JsonKey(name: 'totalOPR') double OPR,
+      @JsonKey(name: 'autoOPR') double Auto,
+      @JsonKey(name: 'teleopOPR') double Teleop,
+      @JsonKey(name: 'towerOPR') double Tower});
 }
 
 /// @nodoc
@@ -153,9 +141,7 @@ class __$$Stats2026ImplCopyWithImpl<$Res>
     Object? OPR = null,
     Object? Auto = null,
     Object? Teleop = null,
-    Object? Endgame = null,
-    Object? Climb = null,
-    Object? MatchHistory = null,
+    Object? Tower = null,
   }) {
     return _then(_$Stats2026Impl(
       Team: null == Team
@@ -178,18 +164,10 @@ class __$$Stats2026ImplCopyWithImpl<$Res>
           ? _value.Teleop
           : Teleop // ignore: cast_nullable_to_non_nullable
               as double,
-      Endgame: null == Endgame
-          ? _value.Endgame
-          : Endgame // ignore: cast_nullable_to_non_nullable
+      Tower: null == Tower
+          ? _value.Tower
+          : Tower // ignore: cast_nullable_to_non_nullable
               as double,
-      Climb: null == Climb
-          ? _value.Climb
-          : Climb // ignore: cast_nullable_to_non_nullable
-              as double,
-      MatchHistory: null == MatchHistory
-          ? _value._MatchHistory
-          : MatchHistory // ignore: cast_nullable_to_non_nullable
-              as List<TeamMatchHistory>,
     ));
   }
 }
@@ -199,14 +177,11 @@ class __$$Stats2026ImplCopyWithImpl<$Res>
 class _$Stats2026Impl implements _Stats2026 {
   const _$Stats2026Impl(
       {required this.Team,
-      required this.Rank,
-      required this.OPR,
-      required this.Auto,
-      required this.Teleop,
-      required this.Endgame,
-      required this.Climb,
-      final List<TeamMatchHistory> MatchHistory = const <TeamMatchHistory>[]})
-      : _MatchHistory = MatchHistory;
+      this.Rank = 0,
+      @JsonKey(name: 'totalOPR') this.OPR = 0.0,
+      @JsonKey(name: 'autoOPR') this.Auto = 0.0,
+      @JsonKey(name: 'teleopOPR') this.Teleop = 0.0,
+      @JsonKey(name: 'towerOPR') this.Tower = 0.0});
 
   factory _$Stats2026Impl.fromJson(Map<String, dynamic> json) =>
       _$$Stats2026ImplFromJson(json);
@@ -214,29 +189,24 @@ class _$Stats2026Impl implements _Stats2026 {
   @override
   final int Team;
   @override
+  @JsonKey()
   final int Rank;
   @override
+  @JsonKey(name: 'totalOPR')
   final double OPR;
   @override
+  @JsonKey(name: 'autoOPR')
   final double Auto;
   @override
+  @JsonKey(name: 'teleopOPR')
   final double Teleop;
   @override
-  final double Endgame;
-  @override
-  final double Climb;
-  final List<TeamMatchHistory> _MatchHistory;
-  @override
-  @JsonKey()
-  List<TeamMatchHistory> get MatchHistory {
-    if (_MatchHistory is EqualUnmodifiableListView) return _MatchHistory;
-    // ignore: implicit_dynamic_type
-    return EqualUnmodifiableListView(_MatchHistory);
-  }
+  @JsonKey(name: 'towerOPR')
+  final double Tower;
 
   @override
   String toString() {
-    return 'Stats2026(Team: $Team, Rank: $Rank, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Endgame: $Endgame, Climb: $Climb, MatchHistory: $MatchHistory)';
+    return 'Stats2026(Team: $Team, Rank: $Rank, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Tower: $Tower)';
   }
 
   @override
@@ -249,16 +219,13 @@ class _$Stats2026Impl implements _Stats2026 {
             (identical(other.OPR, OPR) || other.OPR == OPR) &&
             (identical(other.Auto, Auto) || other.Auto == Auto) &&
             (identical(other.Teleop, Teleop) || other.Teleop == Teleop) &&
-            (identical(other.Endgame, Endgame) || other.Endgame == Endgame) &&
-            (identical(other.Climb, Climb) || other.Climb == Climb) &&
-            const DeepCollectionEquality()
-                .equals(other._MatchHistory, _MatchHistory));
+            (identical(other.Tower, Tower) || other.Tower == Tower));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(runtimeType, Team, Rank, OPR, Auto, Teleop,
-      Endgame, Climb, const DeepCollectionEquality().hash(_MatchHistory));
+  int get hashCode =>
+      Object.hash(runtimeType, Team, Rank, OPR, Auto, Teleop, Tower);
 
   /// Create a copy of Stats2026
   /// with the given fields replaced by the non-null parameter values.
@@ -279,13 +246,11 @@ class _$Stats2026Impl implements _Stats2026 {
 abstract class _Stats2026 implements Stats2026 {
   const factory _Stats2026(
       {required final int Team,
-      required final int Rank,
-      required final double OPR,
-      required final double Auto,
-      required final double Teleop,
-      required final double Endgame,
-      required final double Climb,
-      final List<TeamMatchHistory> MatchHistory}) = _$Stats2026Impl;
+      final int Rank,
+      @JsonKey(name: 'totalOPR') final double OPR,
+      @JsonKey(name: 'autoOPR') final double Auto,
+      @JsonKey(name: 'teleopOPR') final double Teleop,
+      @JsonKey(name: 'towerOPR') final double Tower}) = _$Stats2026Impl;
 
   factory _Stats2026.fromJson(Map<String, dynamic> json) =
       _$Stats2026Impl.fromJson;
@@ -295,17 +260,17 @@ abstract class _Stats2026 implements Stats2026 {
   @override
   int get Rank;
   @override
+  @JsonKey(name: 'totalOPR')
   double get OPR;
   @override
+  @JsonKey(name: 'autoOPR')
   double get Auto;
   @override
+  @JsonKey(name: 'teleopOPR')
   double get Teleop;
   @override
-  double get Endgame;
-  @override
-  double get Climb;
-  @override
-  List<TeamMatchHistory> get MatchHistory;
+  @JsonKey(name: 'towerOPR')
+  double get Tower;
 
   /// Create a copy of Stats2026
   /// with the given fields replaced by the non-null parameter values.

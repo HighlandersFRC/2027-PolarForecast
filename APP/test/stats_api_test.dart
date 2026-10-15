@@ -14,26 +14,24 @@ void main() {
         baseUrl: 'https://api.example.test',
         client: MockClient((request) async {
           requests.add(request);
+          final hasScouting =
+              request.url.queryParameters['username'] == 'scout';
           final stats = {
             'Team': 1741,
             'Rank': 1,
-            'OPR': request.url.queryParameters['username'] == 'scout' ? 55 : 40,
-            'Auto': 10,
-            'Teleop': 20,
-            'Endgame': 10,
-            'Climb': 10,
-            'AutoFuelOPR': 6.5,
-            'TeleopFuelOPR': 18.25,
-            'AverageAutoFuel': 22.0,
-            'AverageTeleopFuel': 74.5,
-            'AverageTotalFuel': 96.5,
-            'CombinedFuelOPR': 24.75,
-            'DeathRate': 0.1,
-            'DefenseRate': 0.25,
-            'DefenseCount': 3,
+            'totalOPR': hasScouting ? 44.623456789 : 40.123456789,
+            'autoOPR': hasScouting ? 11.75 : 10.25,
+            'teleopOPR': hasScouting ? 23.5 : 20.5,
+            'towerOPR': 9.373456789,
+            'AverageAutoFuel': hasScouting ? 22.0 : null,
+            'AverageTeleopFuel': hasScouting ? 74.5 : null,
+            'AverageTotalFuel': hasScouting ? 96.5 : null,
+            'DeathRate': hasScouting ? 0.1 : 0.0,
+            'DefenseRate': hasScouting ? 0.25 : 0.0,
+            'DefenseCount': hasScouting ? 3 : 0,
             'MatchesPlayed': 8,
-            'ScoutEntries': 12,
-            'ScoutedMatches': 7,
+            'ScoutEntries': hasScouting ? 12 : 0,
+            'ScoutedMatches': hasScouting ? 7 : 0,
           };
           return http.Response(
               jsonEncode(
@@ -48,19 +46,23 @@ void main() {
       final event =
           await api.fetchRawStatsByEvent('2026test', username: username);
       final team = await api.getTeamStats('2026test', 1741, username: username);
+      final hasScouting = username?.trim().isNotEmpty == true;
       expect(team.stats.OPR, event.single.OPR);
-      expect(event.single.AutoFuelOPR, 6.5);
-      expect(event.single.TeleopFuelOPR, 18.25);
-      expect(event.single.AverageAutoFuel, 22.0);
-      expect(event.single.AverageTeleopFuel, 74.5);
-      expect(event.single.AverageTotalFuel, 96.5);
-      expect(event.single.CombinedFuelOPR, 24.75);
-      expect(event.single.DeathRate, 0.1);
-      expect(event.single.DefenseRate, 0.25);
-      expect(event.single.DefenseCount, 3);
+      expect(event.single.OPR, hasScouting ? 44.623456789 : 40.123456789);
+      expect(event.single.Auto, hasScouting ? 11.75 : 10.25);
+      expect(event.single.Teleop, hasScouting ? 23.5 : 20.5);
+      expect(event.single.Tower, 9.373456789);
+      expect(team.stats.Tower, event.single.Tower);
+      expect(team.stats.AverageAutoFuel, event.single.AverageAutoFuel);
+      expect(event.single.AverageAutoFuel, hasScouting ? 22.0 : null);
+      expect(event.single.AverageTeleopFuel, hasScouting ? 74.5 : null);
+      expect(event.single.AverageTotalFuel, hasScouting ? 96.5 : null);
+      expect(event.single.DeathRate, hasScouting ? 0.1 : 0.0);
+      expect(event.single.DefenseRate, hasScouting ? 0.25 : 0.0);
+      expect(event.single.DefenseCount, hasScouting ? 3 : 0);
       expect(event.single.MatchesPlayed, 8);
-      expect(event.single.ScoutEntries, 12);
-      expect(event.single.ScoutedMatches, 7);
+      expect(event.single.ScoutEntries, hasScouting ? 12 : 0);
+      expect(event.single.ScoutedMatches, hasScouting ? 7 : 0);
       expect(requests[0].url.queryParameters, requests[1].url.queryParameters);
       expect(
           requests[1].url.queryParameters,
