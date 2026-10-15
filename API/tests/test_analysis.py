@@ -1,4 +1,6 @@
 from copy import deepcopy
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -143,6 +145,23 @@ class ExactOprTests(unittest.TestCase):
 
 
 class RankingPointsTests(unittest.TestCase):
+    def test_real_tba_response_preserves_total_rp_with_and_without_scouting(self):
+        # Actual /event/2026code/rankings response, trimmed to the first two teams.
+        data = json.loads((Path(__file__).parent / "fixtures" /
+                           "tba_2026code_rankings.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["extra_stats_info"][0]["name"], "Total Ranking Points")
+        self.assertEqual(ranking_points(data, "frc118"), 41)
+        self.assertEqual(ranking_points(data, "frc2240"), 38)
+        raw_match = match(red=(118, 1, 2), blue=(2240, 3, 4))
+        for observations in ([], [scouting(team=118)]):
+            rows = {row["Team"]: row for row in calculate_event_stats(
+                [raw_match], data, scouting_data=observations,
+            )}
+            self.assertEqual(rows[118]["RP"], 41)
+            self.assertEqual(rows[2240]["RP"], 38)
+            self.assertEqual(rows[118]["Rank"], 1)
+            self.assertIsNone(rows[1]["RP"])
+
     def test_total_rp_is_identical_with_and_without_scouting(self):
         rankings = {
             "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
@@ -158,7 +177,7 @@ class RankingPointsTests(unittest.TestCase):
 
     def test_metadata_selects_total_rp_instead_of_a_tiebreaker(self):
         data = {
-            "extra_stats_info": [{"name": "Other"}, {"name": "Ranking Points"}],
+            "extra_stats_info": [{"name": "Other"}, {"name": "Total Ranking Points"}],
             "rankings": [{"team_key": "frc1", "extra_stats": [99, 12]}],
         }
         self.assertEqual(ranking_points(data, "frc1"), 12)
@@ -287,7 +306,7 @@ class StatsPipelineTests(unittest.TestCase):
         import api
         rankings = {
             "rankings": [{"team_key": "frc1", "extra_stats": [23]}],
-            "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
+            "extra_stats_info": [{"name": "Total Ranking Points", "precision": 0}],
         }
         with patch("api.TBACollection") as matches, patch("api.ETagsCollection") as etags:
             matches.find.return_value = []
@@ -299,7 +318,7 @@ class StatsPipelineTests(unittest.TestCase):
         import api
         rankings = {
             "rankings": [{"team_key": "frc1", "extra_stats": [23]}],
-            "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
+            "extra_stats_info": [{"name": "Total Ranking Points", "precision": 0}],
         }
         for available in (True, False):
             with (

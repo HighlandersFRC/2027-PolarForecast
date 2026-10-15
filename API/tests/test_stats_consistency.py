@@ -93,6 +93,22 @@ class StatsConsistencyTests(unittest.TestCase):
         with patch("api.rebuild_group_stats", return_value=self.group):
             self.assert_same_stats(self.group, "scout")
 
+    def test_null_rp_caches_from_the_previous_parser_are_rebuilt_on_both_pages(self):
+        self.assertGreater(STATS_CACHE_VERSION, 6)
+        self.assertGreater(GROUP_STATS_CACHE_VERSION, 8)
+        for username, collection, version, rebuild_path in (
+            (None, "StatsCollection", 6, "api.save_stats"),
+            ("scout", "GroupStatsCollection", 8, "api.rebuild_group_stats"),
+        ):
+            with self.subTest(username=username):
+                self.collections[collection].find_one.return_value = {
+                    "data": [{"Team": 1741, "RP": None}], "cache_version": version,
+                }
+                fixed = [{"Team": 1741, "RP": 23}]
+                with patch(rebuild_path, return_value=fixed) as rebuild:
+                    self.assert_same_stats(fixed, username)
+                self.assertEqual(rebuild.call_count, 2)
+
     def test_saved_report_invalidates_old_stats_when_immediate_rebuild_fails(self):
         group_cache = self.collections["GroupStatsCollection"]
         cached = group_cache.find_one.return_value

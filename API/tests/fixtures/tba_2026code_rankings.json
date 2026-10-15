@@ -1,0 +1,74 @@
+{
+  "rankings": [
+    {
+      "rank": 1,
+      "team_key": "frc118",
+      "record": {
+        "wins": 9,
+        "losses": 0,
+        "ties": 0
+      },
+      "qual_average": null,
+      "matches_played": 9,
+      "dq": 0,
+      "sort_orders": [
+        4.56,
+        334.89,
+        52.11,
+        19.44,
+        0.0,
+        0.0
+      ],
+      "extra_stats": [
+        41
+      ]
+    },
+    {
+      "rank": 2,
+      "team_key": "frc2240",
+      "record": {
+        "wins": 9,
+        "losses": 0,
+        "ties": 0
+      },
+      "qual_average": null,
+      "matches_played": 9,
+      "dq": 0,
+      "sort_orders": [
+        4.22,
+        320.78,
+        69.89,
+        1.11,
+        0.0,
+        0.0
+      ],
+      "extra_stats": [
+        38
+      ]
+    }
+  ],
+  "sort_order_info": [
+    {
+      "name": "Ranking Score",
+      "precision": 2
+    },
+    {
+      "name": "Avg Match",
+      "precision": 2
+    },
+    {
+      "name": "Avg Auto Fuel",
+      "precision": 2
+    },
+    {
+      "name": "Avg Tower",
+      "precision": 2
+    }
+  ],
+  "extra_stats_info": [
+    {
+      "name": "Total Ranking Points",
+      "precision": 0
+    }
+  ]
+}

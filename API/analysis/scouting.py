@@ -114,7 +114,9 @@ def ranking_points(rankings_data: Any, team_key: str) -> Optional[float]:
             return None
         index = next((i for i, field in enumerate(info)
                       if isinstance(field, dict)
-                      and field.get("name") == "Ranking Points"), None)
+                      and field.get("name") in (
+                          "Total Ranking Points", "Ranking Points",
+                      )), None)
         if index is None:
             return None
 

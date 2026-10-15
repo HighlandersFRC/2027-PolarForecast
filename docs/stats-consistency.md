@@ -63,11 +63,14 @@ The fuel correction updates Auto, Teleop, and total OPR while preserving tower
 and other non-fuel scoring. Teams without eligible observations retain their
 original TBA OPR. `ScoutingFusion` records the weights and eligible match counts.
 Group stats also include scouting summaries, death/defense rates, and comments.
-The event heatmap's RP column, directly after Rank, uses total Ranking Points
+The event heatmap's RP column, directly after Rank, uses Total Ranking Points
 from TBA's event rankings (`extra_stats`), unchanged by scouting. Higher RP is
 greener; zero is a measured value and missing RP stays neutral. RP is sortable
 and included in event CSV exports. Ranking metadata is cached with the rows;
 older current-season caches use TBA's first `extra_stats` entry for RP.
+TBA labels this metadata `Total Ranking Points`; the parser also accepts
+`Ranking Points`. Public cache version 7 and group cache version 9 rebuild
+the null RP values saved by the earlier parser on the next stats request.
 `GroupStats.data` stores team rows in `Teams` and event scout metrics in
 `ScoutStats`; event/team API responses still return their original team formats.
 See [scout stats](scout-stats.md) for participation and trust calculations.
