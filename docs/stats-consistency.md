@@ -63,6 +63,9 @@ The fuel correction updates Auto, Teleop, and total OPR while preserving tower
 and other non-fuel scoring. Teams without eligible observations retain their
 original TBA OPR. `ScoutingFusion` records the weights and eligible match counts.
 Group stats also include scouting summaries, death/defense rates, and comments.
+`GroupStats.data` stores team rows in `Teams` and event scout metrics in
+`ScoutStats`; event/team API responses still return their original team formats.
+See [scout stats](scout-stats.md) for participation and trust calculations.
 Missing or outdated group caches are rebuilt before event/team responses. A user
 without an applicable group/event falls back to public stats. Signed-in event
 tables and team main pages display scouting analysis alongside TBA metrics;

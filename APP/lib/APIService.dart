@@ -8,6 +8,7 @@ import 'package:app/models/group_events.dart';
 import 'package:app/models/global_ranking.dart';
 import 'package:app/models/match_prediction.dart';
 import 'package:app/models/team_stat.dart';
+import 'package:app/models/scout_stat.dart';
 import 'package:app/models/team_stats.dart';
 import 'package:app/models/user_group_details.dart';
 import 'package:http/http.dart' as http;
@@ -55,6 +56,32 @@ class APIService {
     this.baseUrl = defaultBaseUrl,
     http.Client? client,
   }) : _client = client ?? http.Client();
+
+  Future<List<ScoutStat>> fetchScoutStats({
+    required String eventKey,
+    required String groupId,
+    required String username,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/${Uri.encodeComponent(groupId)}/events/'
+      '${Uri.encodeComponent(eventKey)}/stats',
+    ).replace(queryParameters: {'username': username.trim()});
+    final response = await _client.get(uri, headers: {
+      'Accept': 'application/json'
+    }).timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('Could not load scout stats (${response.statusCode}).');
+    }
+    final body = jsonDecode(response.body);
+    if (body is! Map ||
+        body['data'] is! Map ||
+        body['data']['ScoutStats'] is! List) {
+      throw Exception('Scout stats are unavailable. Update the API and retry.');
+    }
+    return (body['data']['ScoutStats'] as List)
+        .map((row) => ScoutStat.fromJson(Map<String, dynamic>.from(row as Map)))
+        .toList();
+  }
 
   Future<GlobalRankingPage> fetchGlobalRankings({
     int offset = 0,

@@ -157,7 +157,10 @@ def create_data_router(dependencies: DataDependencies) -> APIRouter:
                 {"_id": 0, "data": 1},
             )
 
-        for team_stats in (document or {}).get("data", []):
+        data = (document or {}).get("data", [])
+        if isinstance(data, dict):
+            data = data.get("Teams", [])
+        for team_stats in data:
             if team_stats.get("Team") == team:
                 return {
                     "group_id": group_id,

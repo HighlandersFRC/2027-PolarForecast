@@ -6,6 +6,55 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('scout stats reads GroupStats.data with the current group identity',
+      () async {
+    final api = APIService(
+        baseUrl: 'https://api.example.test',
+        client: MockClient((request) async {
+          expect(request.url.path, '/groups/group-1/events/2026test/stats');
+          expect(request.url.queryParameters, {'username': 'scout'});
+          return http.Response(
+              jsonEncode({
+                'data': {
+                  'Teams': [],
+                  'ScoutStats': [
+                    {
+                      'ScoutId': '1',
+                      'Name': 'Alex',
+                      'Username': 'scout',
+                      'TrustRating': null,
+                      'Contribution': 0,
+                      'Entries': 0,
+                      'CheckedEntries': 0,
+                      'TrendEntries': 0,
+                      'TBAEntries': 0,
+                      'Provisional': true,
+                    }
+                  ],
+                }
+              }),
+              200);
+        }));
+    addTearDown(api.dispose);
+    final stats = await api.fetchScoutStats(
+        eventKey: '2026test', groupId: 'group-1', username: ' scout ');
+    expect(stats.single.name, 'Alex');
+    expect(stats.single.trustRating, isNull);
+    expect(stats.single.entries, 0);
+  });
+
+  test('old API responses report unavailable scout stats instead of empty data',
+      () async {
+    final api = APIService(
+        client: MockClient(
+            (_) async => http.Response(jsonEncode({'data': []}), 200)));
+    addTearDown(api.dispose);
+    await expectLater(
+        api.fetchScoutStats(
+            eventKey: '2026test', groupId: 'group-1', username: 'scout'),
+        throwsException);
+  });
+
   for (final username in <String?>[null, '', '   ', ' scout ']) {
     test('event and team requests use the same identity: "$username"',
         () async {

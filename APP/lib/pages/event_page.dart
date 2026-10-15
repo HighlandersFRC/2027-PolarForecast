@@ -14,6 +14,7 @@ import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/DataSourceBanner.dart';
 import 'package:app/widgets/matte_theme.dart';
 import 'package:app/widgets/event_stats_grid.dart';
+import 'package:app/widgets/scout_stats_view.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -226,6 +227,22 @@ class _EventPageState extends State<EventPage> {
                 );
               }
 
+              if (_selectedIndex == 7) {
+                if (_statsUsername == null || _pitGroupId == null) {
+                  return const _EmptyState(
+                    icon: Icons.groups_outlined,
+                    title: 'Group required',
+                    message: 'Log in and join a group to view scout stats.',
+                  );
+                }
+                return ScoutStatsView(
+                  key: ValueKey('$_pitGroupId-$_statsUsername-$_apiEventKey'),
+                  eventKey: _apiEventKey,
+                  groupId: _pitGroupId!,
+                  username: _statsUsername!,
+                );
+              }
+
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const _PageLoadingState();
               }
@@ -376,6 +393,11 @@ class _EventPageState extends State<EventPage> {
             selectedIcon: Icon(Icons.assignment_rounded),
             label: 'Pit Scouting',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups_rounded),
+            label: 'Scouts',
+          ),
         ],
       ),
     );
@@ -458,6 +480,13 @@ class _EventPageState extends State<EventPage> {
                         label: 'Picklist',
                         icon: Icons.playlist_add_check_circle_outlined,
                         selectedIcon: Icons.playlist_add_check_circle_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 7,
+                        label: 'Scouts',
+                        icon: Icons.groups_outlined,
+                        selectedIcon: Icons.groups_rounded,
                         extended: extended,
                       ),
                       Padding(

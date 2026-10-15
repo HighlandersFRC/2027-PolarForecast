@@ -22,6 +22,7 @@ from models.follow_ups import FollowUp
 from models.picklist import PicklistCreate, PicklistUpdate
 from models.robot_image import RobotImageUpload
 from analysis.event_stats import calculate_event_stats
+from analysis.scout_stats import calculate_scout_stats
 from global_rankings import GlobalRankings, RankingSnapshotExpired
 from Predictions import predict as predict_matches
 from config import (
@@ -59,7 +60,7 @@ CACHE_UPDATE_INTERVAL_SECONDS = 300
 PREDICTION_CACHE_VERSION = 5
 
 STATS_CACHE_VERSION = 5
-GROUP_STATS_CACHE_VERSION = 5
+GROUP_STATS_CACHE_VERSION = 7
 tags_metadata = [
     {
         "name": "default",
@@ -2199,6 +2200,7 @@ def save_group_stats(
     stats_data,
     scout_document_count: int,
     member_count: int,
+    scout_stats=None,
 ):
     GroupStatsCollection.update_one(
         {
@@ -2210,7 +2212,7 @@ def save_group_stats(
                 "group_id": group_id,
                 "groupId": group_id,
                 "event_key": event,
-                "data": stats_data,
+                "data": {"Teams": stats_data, "ScoutStats": scout_stats or []},
                 "scout_document_count": scout_document_count,
                 "member_count": member_count,
                 "cache_version": GROUP_STATS_CACHE_VERSION,
@@ -2267,6 +2269,7 @@ def rebuild_group_stats(
         stats_data=stats_data,
         scout_document_count=len(scout_data),
         member_count=len(members),
+        scout_stats=calculate_scout_stats(members, scout_data, matches, event),
     )
 
     return stats_data
@@ -3073,6 +3076,9 @@ def get_stats_from_db(
                     group_stats = rebuild_group_stats(group_id, event)
                 else:
                     group_stats = group_stats_document.get("data")
+
+                if isinstance(group_stats, dict):
+                    group_stats = group_stats.get("Teams", [])
 
                 if isinstance(group_stats, list) and group_stats:
                     return group_stats
