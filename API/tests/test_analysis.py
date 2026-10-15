@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from analysis.analysis import OPR
 from analysis.event_stats import calculate_event_stats
+from analysis.scouting import ranking_points
 from Predictions import fit_opr_from_completed_matches
 
 
@@ -141,6 +142,41 @@ class ExactOprTests(unittest.TestCase):
         self.assertEqual(self.calculate([]), {})
 
 
+class RankingPointsTests(unittest.TestCase):
+    def test_total_rp_is_identical_with_and_without_scouting(self):
+        rankings = {
+            "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
+            "rankings": [{"team_key": "frc1", "rank": 2,
+                          "extra_stats": [23], "sort_orders": [2.875]}],
+        }
+        for observations in ([], [scouting()]):
+            rows = {row["Team"]: row for row in calculate_event_stats(
+                [match()], rankings, scouting_data=observations,
+            )}
+            self.assertEqual(rows[1]["RP"], 23)
+            self.assertIsNone(rows[2]["RP"])
+
+    def test_metadata_selects_total_rp_instead_of_a_tiebreaker(self):
+        data = {
+            "extra_stats_info": [{"name": "Other"}, {"name": "Ranking Points"}],
+            "rankings": [{"team_key": "frc1", "extra_stats": [99, 12]}],
+        }
+        self.assertEqual(ranking_points(data, "frc1"), 12)
+        data["extra_stats_info"] = [{"name": "Other"}]
+        self.assertIsNone(ranking_points(data, "frc1"))
+
+    def test_legacy_cache_zero_and_missing_or_malformed_values(self):
+        for value, expected in (([0], 0), ([18], 18), ([], None),
+                                (None, None), ([None], None), ([True], None),
+                                ([-1], None), ([float("nan")], None)):
+            with self.subTest(value=value):
+                self.assertEqual(ranking_points({
+                    "rankings": [{"team_key": "frc1", "extra_stats": value}],
+                }, "frc1"), expected)
+        for data in (None, {}, {"rankings": None}, {"rankings": [None]}):
+            self.assertIsNone(ranking_points(data, "frc1"))
+
+
 class ConservativeScoutingFusionTests(unittest.TestCase):
     def setUp(self):
         self.matches = [self.fuel_match(1), self.fuel_match(2)]
@@ -247,6 +283,44 @@ class ConservativeScoutingFusionTests(unittest.TestCase):
 
 
 class StatsPipelineTests(unittest.TestCase):
+    def test_cached_rankings_keep_rp_metadata_for_group_and_public_rebuilds(self):
+        import api
+        rankings = {
+            "rankings": [{"team_key": "frc1", "extra_stats": [23]}],
+            "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
+        }
+        with patch("api.TBACollection") as matches, patch("api.ETagsCollection") as etags:
+            matches.find.return_value = []
+            etags.find_one.return_value = rankings
+            self.assertEqual(api.get_cached_event_analysis_inputs("2026test"), ([], rankings))
+        self.assertEqual(etags.find_one.call_args.args[1]["extra_stats_info"], 1)
+
+    def test_tba_refresh_saves_rp_metadata_and_keeps_it_when_tba_is_unavailable(self):
+        import api
+        rankings = {
+            "rankings": [{"team_key": "frc1", "extra_stats": [23]}],
+            "extra_stats_info": [{"name": "Ranking Points", "precision": 0}],
+        }
+        for available in (True, False):
+            with (
+                self.subTest(available=available),
+                patch("api.get_tba_response") as tba,
+                patch("api.StatsCollection"),
+                patch("api.PredictionCollection"),
+                patch("api.ETagsCollection") as etags,
+                patch("api.build_and_save_event", return_value=([], {})) as build,
+            ):
+                match_response = Mock(status_code=200, headers={})
+                match_response.json.return_value = []
+                ranking_response = Mock(status_code=200)
+                ranking_response.json.return_value = rankings
+                tba.side_effect = [match_response, ranking_response if available else None]
+                api.update_event_cache({"key": "2026test", **rankings})
+                self.assertEqual(build.call_args.args[2], rankings)
+                saved = etags.update_one.call_args.args[1]["$set"]
+                self.assertEqual(saved["extra_stats_info"], rankings["extra_stats_info"])
+                self.assertEqual(saved["rankings"], rankings["rankings"])
+
     def test_two_scouting_submissions_change_event_and_team_stats_only_for_the_group(self):
         import api
         matches = [match(number, red=(4499, 1, 2), blue=(3, 4, 5)) for number in range(1, 13)]

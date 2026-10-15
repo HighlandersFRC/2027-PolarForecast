@@ -10,6 +10,7 @@ _$TeamStatImpl _$$TeamStatImplFromJson(Map<String, dynamic> json) =>
     _$TeamStatImpl(
       Team: (json['Team'] as num).toInt(),
       Rank: (json['Rank'] as num?)?.toInt() ?? 0,
+      RP: (json['RP'] as num?)?.toDouble(),
       OPR: (json['totalOPR'] as num?)?.toDouble() ?? 0.0,
       Auto: (json['autoOPR'] as num?)?.toDouble() ?? 0.0,
       Teleop: (json['teleopOPR'] as num?)?.toDouble() ?? 0.0,
@@ -29,6 +30,7 @@ Map<String, dynamic> _$$TeamStatImplToJson(_$TeamStatImpl instance) =>
     <String, dynamic>{
       'Team': instance.Team,
       'Rank': instance.Rank,
+      'RP': instance.RP,
       'totalOPR': instance.OPR,
       'autoOPR': instance.Auto,
       'teleopOPR': instance.Teleop,

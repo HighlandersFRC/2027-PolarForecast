@@ -68,6 +68,7 @@ void main() {
           final stats = {
             'Team': 1741,
             'Rank': 1,
+            'RP': 23,
             'totalOPR': hasScouting ? 44.623456789 : 40.123456789,
             'autoOPR': hasScouting ? 11.75 : 10.25,
             'teleopOPR': hasScouting ? 23.5 : 20.5,
@@ -97,6 +98,8 @@ void main() {
       final team = await api.getTeamStats('2026test', 1741, username: username);
       final hasScouting = username?.trim().isNotEmpty == true;
       expect(team.stats.OPR, event.single.OPR);
+      expect(event.single.RP, 23);
+      expect(team.stats.RP, event.single.RP);
       expect(event.single.OPR, hasScouting ? 44.623456789 : 40.123456789);
       expect(event.single.Auto, hasScouting ? 11.75 : 10.25);
       expect(event.single.Teleop, hasScouting ? 23.5 : 20.5);

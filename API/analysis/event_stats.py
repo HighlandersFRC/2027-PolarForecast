@@ -9,6 +9,7 @@ from .scouting import (
     analyze_scout_data,
     fuse_scouting_fuel,
     rankings,
+    ranking_points,
 )
 
 
@@ -46,6 +47,7 @@ def calculate_event_stats(
         results.append({
             "Team": team,
             "Rank": rankings(rankings_data, f"frc{team}"),
+            "RP": ranking_points(rankings_data, f"frc{team}"),
             **values,
             "MatchesPlayed": match_counts.get(team, 0),
             "ScoutEntries": scouting.get("ScoutEntries", 0),

@@ -59,8 +59,8 @@ CACHE_UPDATE_INTERVAL_SECONDS = 300
 
 PREDICTION_CACHE_VERSION = 5
 
-STATS_CACHE_VERSION = 5
-GROUP_STATS_CACHE_VERSION = 7
+STATS_CACHE_VERSION = 6
+GROUP_STATS_CACHE_VERSION = 8
 tags_metadata = [
     {
         "name": "default",
@@ -1645,11 +1645,13 @@ def get_cached_event_analysis_inputs(event: str):
         {
             "_id": 0,
             "rankings": 1,
+            "extra_stats_info": 1,
         },
     ) or {}
 
     rankings_data = {
         "rankings": etag_document.get("rankings", []),
+        "extra_stats_info": etag_document.get("extra_stats_info"),
     }
 
     return matches, rankings_data
@@ -2746,7 +2748,10 @@ def update_event_cache(event_document):
         headers=dict(HEADERS),
     )
 
-    rankings_data = {"rankings": event_document.get("rankings", [])}
+    rankings_data = {
+        "rankings": event_document.get("rankings", []),
+        "extra_stats_info": event_document.get("extra_stats_info"),
+    }
 
     if ranking_response is not None:
         rankings_data = parse_tba_json(
@@ -2774,6 +2779,7 @@ def update_event_cache(event_document):
             "rankings",
             [],
         ),
+        "extra_stats_info": rankings_data.get("extra_stats_info"),
         "updated_at": now_utc(),
     }
 

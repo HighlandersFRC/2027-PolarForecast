@@ -8,6 +8,7 @@ const teams = [
   TeamStat(
       Team: 101,
       Rank: 2,
+      RP: 0,
       OPR: -12.5,
       Auto: 1,
       Teleop: 2,
@@ -19,6 +20,7 @@ const teams = [
   TeamStat(
       Team: 202,
       Rank: 1,
+      RP: 23,
       OPR: 90,
       Auto: 10,
       Teleop: 20,
@@ -78,9 +80,14 @@ void main() {
     expect(color(tester, 101, 'opr'), isNot(color(tester, 202, 'opr')));
     // A lower rank uses the same favorable end of the scale as a higher OPR.
     expect(color(tester, 202, 'rank'), color(tester, 202, 'opr'));
+    expect(color(tester, 202, 'rp'), color(tester, 202, 'opr'));
+    expect(color(tester, 101, 'rp'), color(tester, 101, 'opr'));
+    final columns = tester.widget<SfDataGrid>(find.byType(SfDataGrid)).columns;
+    expect(columns.map((column) => column.columnName).take(4),
+        ['team', 'rank', 'rp', 'opr']);
     final frozenPosition = tester.getTopLeft(cell(101, 'team'));
     await tester.dragFrom(
-        tester.getCenter(cell(101, 'opr')), const Offset(-280, 0));
+        tester.getCenter(cell(101, 'rp')), const Offset(-350, 0));
     await tester.pumpAndSettle();
     expect(cell(101, 'tower').hitTestable(), findsOneWidget);
     expect(tester.getTopLeft(cell(101, 'team')), frozenPosition);
@@ -111,13 +118,27 @@ void main() {
     String? sorted;
     TeamStat? selected;
     await mount(tester, onSort: (key) => sorted = key);
-    await tester.tap(find.text('OPR'));
-    expect(sorted, 'opr');
+    await tester.tap(find.text('RP'));
+    expect(sorted, 'rp');
     await mount(tester,
         visible: teams.reversed.toList(), onTeamTap: (team) => selected = team);
     await tester.tap(cell(202, 'team'));
     expect(selected?.Team, 202);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'missing RP stays neutral while zero RP is measured', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await mount(tester, width: 1200,
+        visible: [teams.first, teams.last.copyWith(RP: null)]);
+    expect(color(tester, 101, 'rp'), isNot(EventStatsGrid.surfaceColor));
+    expect(find.descendant(of: cell(101, 'rp'), matching: find.text('0')),
+        findsOneWidget);
+    expect(color(tester, 202, 'rp'), EventStatsGrid.surfaceColor);
+    expect(find.descendant(of: cell(202, 'rp'), matching: find.text('\u2014')),
+        findsOneWidget);
   });
 
   testWidgets(

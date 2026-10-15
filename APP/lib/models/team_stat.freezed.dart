@@ -23,6 +23,7 @@ mixin _$TeamStat {
   int get Team =>
       throw _privateConstructorUsedError; // A team may temporarily have no rank before rankings exist.
   int get Rank => throw _privateConstructorUsedError;
+  double? get RP => throw _privateConstructorUsedError;
   @JsonKey(name: 'totalOPR')
   double get OPR => throw _privateConstructorUsedError;
   @JsonKey(name: 'autoOPR')
@@ -59,6 +60,7 @@ abstract class $TeamStatCopyWith<$Res> {
   $Res call(
       {int Team,
       int Rank,
+      double? RP,
       @JsonKey(name: 'totalOPR') double OPR,
       @JsonKey(name: 'autoOPR') double Auto,
       @JsonKey(name: 'teleopOPR') double Teleop,
@@ -91,6 +93,7 @@ class _$TeamStatCopyWithImpl<$Res, $Val extends TeamStat>
   $Res call({
     Object? Team = null,
     Object? Rank = null,
+    Object? RP = freezed,
     Object? OPR = null,
     Object? Auto = null,
     Object? Teleop = null,
@@ -114,6 +117,10 @@ class _$TeamStatCopyWithImpl<$Res, $Val extends TeamStat>
           ? _value.Rank
           : Rank // ignore: cast_nullable_to_non_nullable
               as int,
+      RP: freezed == RP
+          ? _value.RP
+          : RP // ignore: cast_nullable_to_non_nullable
+              as double?,
       OPR: null == OPR
           ? _value.OPR
           : OPR // ignore: cast_nullable_to_non_nullable
@@ -181,6 +188,7 @@ abstract class _$$TeamStatImplCopyWith<$Res>
   $Res call(
       {int Team,
       int Rank,
+      double? RP,
       @JsonKey(name: 'totalOPR') double OPR,
       @JsonKey(name: 'autoOPR') double Auto,
       @JsonKey(name: 'teleopOPR') double Teleop,
@@ -211,6 +219,7 @@ class __$$TeamStatImplCopyWithImpl<$Res>
   $Res call({
     Object? Team = null,
     Object? Rank = null,
+    Object? RP = freezed,
     Object? OPR = null,
     Object? Auto = null,
     Object? Teleop = null,
@@ -234,6 +243,10 @@ class __$$TeamStatImplCopyWithImpl<$Res>
           ? _value.Rank
           : Rank // ignore: cast_nullable_to_non_nullable
               as int,
+      RP: freezed == RP
+          ? _value.RP
+          : RP // ignore: cast_nullable_to_non_nullable
+              as double?,
       OPR: null == OPR
           ? _value.OPR
           : OPR // ignore: cast_nullable_to_non_nullable
@@ -296,6 +309,7 @@ class _$TeamStatImpl extends _TeamStat {
   const _$TeamStatImpl(
       {required this.Team,
       this.Rank = 0,
+      this.RP,
       @JsonKey(name: 'totalOPR') this.OPR = 0.0,
       @JsonKey(name: 'autoOPR') this.Auto = 0.0,
       @JsonKey(name: 'teleopOPR') this.Teleop = 0.0,
@@ -320,6 +334,8 @@ class _$TeamStatImpl extends _TeamStat {
   @override
   @JsonKey()
   final int Rank;
+  @override
+  final double? RP;
   @override
   @JsonKey(name: 'totalOPR')
   final double OPR;
@@ -359,7 +375,7 @@ class _$TeamStatImpl extends _TeamStat {
 
   @override
   String toString() {
-    return 'TeamStat(Team: $Team, Rank: $Rank, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Tower: $Tower, AverageAutoFuel: $AverageAutoFuel, AverageTeleopFuel: $AverageTeleopFuel, AverageTotalFuel: $AverageTotalFuel, DeathRate: $DeathRate, DefenseRate: $DefenseRate, DefenseCount: $DefenseCount, MatchesPlayed: $MatchesPlayed, ScoutEntries: $ScoutEntries, ScoutedMatches: $ScoutedMatches)';
+    return 'TeamStat(Team: $Team, Rank: $Rank, RP: $RP, OPR: $OPR, Auto: $Auto, Teleop: $Teleop, Tower: $Tower, AverageAutoFuel: $AverageAutoFuel, AverageTeleopFuel: $AverageTeleopFuel, AverageTotalFuel: $AverageTotalFuel, DeathRate: $DeathRate, DefenseRate: $DefenseRate, DefenseCount: $DefenseCount, MatchesPlayed: $MatchesPlayed, ScoutEntries: $ScoutEntries, ScoutedMatches: $ScoutedMatches)';
   }
 
   @override
@@ -369,6 +385,7 @@ class _$TeamStatImpl extends _TeamStat {
             other is _$TeamStatImpl &&
             (identical(other.Team, Team) || other.Team == Team) &&
             (identical(other.Rank, Rank) || other.Rank == Rank) &&
+            (identical(other.RP, RP) || other.RP == RP) &&
             (identical(other.OPR, OPR) || other.OPR == OPR) &&
             (identical(other.Auto, Auto) || other.Auto == Auto) &&
             (identical(other.Teleop, Teleop) || other.Teleop == Teleop) &&
@@ -399,6 +416,7 @@ class _$TeamStatImpl extends _TeamStat {
       runtimeType,
       Team,
       Rank,
+      RP,
       OPR,
       Auto,
       Teleop,
@@ -433,6 +451,7 @@ abstract class _TeamStat extends TeamStat {
   const factory _TeamStat(
       {required final int Team,
       final int Rank,
+      final double? RP,
       @JsonKey(name: 'totalOPR') final double OPR,
       @JsonKey(name: 'autoOPR') final double Auto,
       @JsonKey(name: 'teleopOPR') final double Teleop,
@@ -455,6 +474,8 @@ abstract class _TeamStat extends TeamStat {
   int get Team; // A team may temporarily have no rank before rankings exist.
   @override
   int get Rank;
+  @override
+  double? get RP;
   @override
   @JsonKey(name: 'totalOPR')
   double get OPR;

@@ -763,6 +763,7 @@ class _StatsViewState extends State<_StatsView> {
   num? _sortValue(TeamStat team) => switch (_sortKey) {
         'team' => team.Team,
         'rank' => team.Rank > 0 ? team.Rank : null,
+        'rp' => team.RP,
         'opr' => team.OPR,
         'auto' => team.Auto,
         'teleop' => team.Teleop,
@@ -831,6 +832,7 @@ class _StatsViewState extends State<_StatsView> {
       [
         'Team',
         'Rank',
+        'RP',
         'OPR',
         'Auto',
         'Teleop',
@@ -845,6 +847,7 @@ class _StatsViewState extends State<_StatsView> {
         (team) => [
           team.Team,
           team.Rank,
+          team.RP,
           team.OPR,
           team.Auto,
           team.Teleop,
@@ -1024,6 +1027,7 @@ class _StatsViewState extends State<_StatsView> {
               itemBuilder: (_) => [
                 for (final item in [
                   ('rank', 'Rank'),
+                  ('rp', 'RP'),
                   ('team', 'Team'),
                   ('opr', 'OPR'),
                   ('auto', 'Auto'),
@@ -1363,6 +1367,9 @@ class _StatsViewState extends State<_StatsView> {
 
       case 'rank':
         return 'rank';
+
+      case 'rp':
+        return 'RP';
 
       case 'opr':
         return 'OPR';

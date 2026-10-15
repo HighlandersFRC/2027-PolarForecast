@@ -14,6 +14,7 @@ class TeamStat with _$TeamStat {
 
     // A team may temporarily have no rank before rankings exist.
     @Default(0) int Rank,
+    double? RP,
     @JsonKey(name: 'totalOPR') @Default(0.0) double OPR,
     @JsonKey(name: 'autoOPR') @Default(0.0) double Auto,
     @JsonKey(name: 'teleopOPR') @Default(0.0) double Teleop,

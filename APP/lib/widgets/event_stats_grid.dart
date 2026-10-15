@@ -219,6 +219,7 @@ const _high = Color(0xFF315A4A);
 const _coreMetrics = [
   _Metric('team', 'Team', 84),
   _Metric('rank', 'Rank', 64, reversed: true),
+  _Metric('rp', 'RP', 64),
   _Metric('opr', 'OPR', 76),
   _Metric('auto', 'Auto', 72),
   _Metric('teleop', 'Teleop', 80),
@@ -243,6 +244,7 @@ class _Metric {
   num? value(TeamStat team) => switch (key) {
         'team' => team.Team,
         'rank' => team.Rank > 0 ? team.Rank : null,
+        'rp' => team.RP,
         'opr' => team.OPR,
         'auto' => team.Auto,
         'teleop' => team.Teleop,
@@ -319,6 +321,7 @@ class _EventStatsSource extends DataGridSource {
             ? '${(value * 100).toStringAsFixed(0)}%'
             : metric.key == 'team' ||
                     metric.key == 'rank' ||
+                    metric.key == 'rp' ||
                     metric.key == 'scouted'
                 ? value.toInt().toString()
                 : value.toStringAsFixed(1);

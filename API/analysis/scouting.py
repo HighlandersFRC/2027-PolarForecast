@@ -97,6 +97,38 @@ def rankings(rankings_data: Any, team_key: str) -> Optional[int]:
     return None
 
 
+def ranking_points(rankings_data: Any, team_key: str) -> Optional[float]:
+    """Read total RP from TBA, without deriving it from scores or scouting."""
+    if not isinstance(rankings_data, dict):
+        return None
+    rows = rankings_data.get("rankings")
+    if not isinstance(rows, list):
+        return None
+
+    info = rankings_data.get("extra_stats_info")
+    # Older caches saved the ranking rows without metadata. For the current
+    # season, TBA puts total Ranking Points first in extra_stats.
+    index = 0
+    if info is not None:
+        if not isinstance(info, list):
+            return None
+        index = next((i for i, field in enumerate(info)
+                      if isinstance(field, dict)
+                      and field.get("name") == "Ranking Points"), None)
+        if index is None:
+            return None
+
+    for row in rows:
+        if not isinstance(row, dict) or row.get("team_key") != team_key:
+            continue
+        values = row.get("extra_stats")
+        if not isinstance(values, list) or index >= len(values):
+            return None
+        value = _safe_float(values[index])
+        return value if value is not None and value >= 0 else None
+    return None
+
+
 def _extract_sequence(value: Any) -> list:
     """
     Accepts raw lists as well as common MongoDB/cache wrapper documents.
