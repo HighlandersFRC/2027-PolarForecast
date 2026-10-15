@@ -1,14 +1,22 @@
 import 'package:app/APIService.dart';
 import 'package:app/models/global_ranking.dart';
+import 'package:app/models/team_event.dart';
 import 'package:app/services/global_rankings_controller.dart';
 import 'package:app/widgets/global_rankings_grid.dart';
 import 'package:app/widgets/matte_theme.dart';
+import 'package:app/widgets/team_events_dialog.dart';
 import 'package:flutter/material.dart';
 
 class GlobalRankingsBoard extends StatefulWidget {
   final GlobalRankingsController? controller;
   final ValueChanged<GlobalRanking>? onTeamTap;
-  const GlobalRankingsBoard({super.key, this.controller, this.onTeamTap});
+  final Future<List<TeamEvent>> Function(int)? loadTeamEvents;
+  const GlobalRankingsBoard({
+    super.key,
+    this.controller,
+    this.onTeamTap,
+    this.loadTeamEvents,
+  });
   @override
   State<GlobalRankingsBoard> createState() => _GlobalRankingsBoardState();
 }
@@ -35,17 +43,27 @@ class _GlobalRankingsBoardState extends State<GlobalRankingsBoard> {
   @override
   void dispose() {
     _search.dispose();
-    if (_api != null) _rankings.dispose();
+    if (widget.controller == null) _rankings.dispose();
     _api?.dispose();
     super.dispose();
   }
 
-  void _openTeam(GlobalRanking team) {
+  Future<void> _openTeam(GlobalRanking team) async {
     if (widget.onTeamTap != null) {
       widget.onTeamTap!(team);
     } else {
-      Navigator.of(context)
-          .pushNamed('/event/${team.eventKey}/${team.team}/team');
+      final load =
+          widget.loadTeamEvents ?? (_api ??= APIService()).fetchTeamEvents;
+      final eventKey = await showDialog<String>(
+        context: context,
+        builder: (_) => TeamEventsDialog(
+          team: team,
+          load: () => load(team.team),
+        ),
+      );
+      if (mounted && eventKey != null) {
+        Navigator.of(context).pushNamed('/event/$eventKey');
+      }
     }
   }
 
@@ -106,7 +124,10 @@ class _GlobalRankingsBoardState extends State<GlobalRankingsBoard> {
                           ranges: _rankings.ranges,
                           identity: _rankings.identity,
                           onTeamTap: _openTeam,
-                          onRefresh: _rankings.refresh)),
+                          onRefresh: _rankings.refresh,
+                          footer: _rankings.nextOffset == null
+                              ? null
+                              : _loadMore())),
           if (_rankings.error != null && _rankings.teams.isNotEmpty)
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Flexible(
@@ -116,27 +137,28 @@ class _GlobalRankingsBoardState extends State<GlobalRankingsBoard> {
               TextButton(
                   onPressed: _rankings.refresh, child: const Text('Try again')),
             ]),
-          if (_rankings.nextOffset != null && !_rankings.loading)
-            SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Center(
-                      child: FilledButton.tonalIcon(
-                    key: const ValueKey('load-more-rankings'),
-                    onPressed: _rankings.loadingMore || _rankings.refreshing
-                        ? null
-                        : _rankings.loadMore,
-                    icon: _rankings.loadingMore
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.expand_more_rounded),
-                    label: Text(
-                        _rankings.loadingMore ? 'Loading...' : 'Load more'),
-                  )),
-                )),
         ]),
+      );
+
+  Widget _loadMore() => SizedBox(
+        width: double.infinity,
+        child: TextButton.icon(
+          key: const ValueKey('load-more-rankings'),
+          style: TextButton.styleFrom(
+            backgroundColor: AppColors.surfaceRaised,
+            shape: const RoundedRectangleBorder(),
+            padding: const EdgeInsets.symmetric(vertical: 20),
+          ),
+          onPressed: _rankings.loadingMore || _rankings.refreshing
+              ? null
+              : _rankings.loadMore,
+          icon: _rankings.loadingMore
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.expand_more_rounded),
+          label: Text(_rankings.loadingMore ? 'Loading...' : 'Load more'),
+        ),
       );
 
   Widget _empty() => Center(

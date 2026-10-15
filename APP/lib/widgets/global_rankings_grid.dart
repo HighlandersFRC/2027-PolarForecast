@@ -14,6 +14,7 @@ class GlobalRankingsGrid extends StatefulWidget {
   final Future<Map<String, dynamic>> Function(int) identity;
   final ValueChanged<GlobalRanking> onTeamTap;
   final Future<void> Function()? onRefresh;
+  final Widget? footer;
 
   const GlobalRankingsGrid(
       {super.key,
@@ -21,7 +22,8 @@ class GlobalRankingsGrid extends StatefulWidget {
       required this.ranges,
       required this.identity,
       required this.onTeamTap,
-      this.onRefresh});
+      this.onRefresh,
+      this.footer});
 
   @override
   State<GlobalRankingsGrid> createState() => _GlobalRankingsGridState();
@@ -84,6 +86,8 @@ class _GlobalRankingsGridState extends State<GlobalRankingsGrid> {
             highlightRowOnHover: false,
             isScrollbarAlwaysShown: !compact,
             allowPullToRefresh: widget.onRefresh != null,
+            footer: widget.footer,
+            footerHeight: 64,
             columns: [
               GridColumn(
                   columnName: 'rank',

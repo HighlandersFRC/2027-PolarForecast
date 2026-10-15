@@ -6,6 +6,7 @@ import 'package:app/models/2026Pitscouting.dart';
 import 'package:app/models/follow_up.dart';
 import 'package:app/models/group_events.dart';
 import 'package:app/models/global_ranking.dart';
+import 'package:app/models/team_event.dart';
 import 'package:app/models/match_prediction.dart';
 import 'package:app/models/team_stat.dart';
 import 'package:app/models/scout_stat.dart';
@@ -102,6 +103,20 @@ class APIService {
     }
     return GlobalRankingPage.fromJson(
         Map<String, dynamic>.from(jsonDecode(response.body) as Map));
+  }
+
+  Future<List<TeamEvent>> fetchTeamEvents(int team) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/teams/$team/events'),
+      headers: {'Accept': 'application/json'},
+    ).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('Could not load team events (${response.statusCode}).');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return (body['data'] as List)
+        .map((row) => TeamEvent.fromJson(Map<String, dynamic>.from(row as Map)))
+        .toList();
   }
 
   Future<List<Stats2026>> fetchStatsByEvent(

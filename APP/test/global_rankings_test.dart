@@ -3,10 +3,12 @@ import 'dart:convert';
 
 import 'package:app/APIService.dart';
 import 'package:app/models/global_ranking.dart';
+import 'package:app/models/team_event.dart';
 import 'package:app/services/global_rankings_controller.dart';
 import 'package:app/widgets/global_rankings_board.dart';
 import 'package:app/widgets/global_rankings_grid.dart';
 import 'package:app/widgets/matte_theme.dart';
+import 'package:app/widgets/team_events_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -231,15 +233,161 @@ void main() {
       expect(find.text('Polar Robotics 0'), findsOneWidget);
       expect(icons.length, inInclusiveRange(1, 49));
       expect(rankings.teams.length, 50);
+      final loadMore = find.byKey(const ValueKey('load-more-rankings'));
+      expect(loadMore.hitTestable(), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('1000'));
       expect(selected?.eventKey, '2026cokc');
-      await tester.tap(find.byKey(const ValueKey('load-more-rankings')));
+      final verticalScroll = find.byWidgetPredicate((widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down);
+      await tester.scrollUntilVisible(loadMore, 600,
+          scrollable: verticalScroll.first, maxScrolls: 15);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(loadMore).width, closeTo(width, 2));
+      await tester.tap(loadMore);
       await tester.pumpAndSettle();
       expect(rankings.teams.length, 100);
+      expect(loadMore.hitTestable(), findsNothing);
+      await tester.scrollUntilVisible(loadMore, 600,
+          scrollable: verticalScroll.first, maxScrolls: 15);
+      await tester.tap(loadMore);
+      await tester.pumpAndSettle();
+      expect(rankings.teams.length, 130);
+      expect(loadMore, findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       rankings.dispose();
     });
   }
+
+  test('API loads REBUILT event history with dates and locations',
+      () async {
+    final api = APIService(client: MockClient((request) async {
+      expect(request.url.path, '/teams/1000/events');
+      expect(request.url.queryParameters, isEmpty);
+      return http.Response(
+          jsonEncode({
+            'team': 1000,
+            'data': [
+              {
+                'key': '2026early',
+                'name': 'Earlier Regional',
+                'start_date': '2026-03-01',
+                'end_date': '2026-03-03',
+                'city': 'Denver',
+                'state_prov': 'CO',
+                'country': 'USA',
+              },
+              {'key': '2026new', 'name': 'Latest Regional'},
+            ],
+          }),
+          200);
+    }));
+    addTearDown(api.dispose);
+    final events = await api.fetchTeamEvents(1000);
+    expect(events.map((event) => event.key), ['2026early', '2026new']);
+    expect(events.first.start, DateTime(2026, 3, 1));
+    expect(events.first.end, DateTime(2026, 3, 3));
+    expect(events.first.location, 'Denver, CO, USA');
+    expect(events.last.start, isNull);
+  });
+
+  for (final width in [320.0, 1200.0]) {
+    testWidgets('team popup fits $width px and opens the selected event',
+        (tester) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rankings = GlobalRankingsController(
+        load: ({required offset, required query, snapshot}) async =>
+            page(offset),
+        identity: (_) async => {},
+      );
+      final history = Completer<List<TeamEvent>>();
+      String? destination;
+      await tester.pumpWidget(MaterialApp(
+        theme: buildMatteTheme(),
+        onGenerateRoute: (settings) {
+          destination = settings.name;
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('Selected event page')),
+          );
+        },
+        home: Scaffold(
+            body: GlobalRankingsBoard(
+          controller: rankings,
+          loadTeamEvents: (team) {
+            expect(team, 1000);
+            return history.future;
+          },
+        )),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1000'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(TeamEventsDialog), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(destination, isNull);
+      history.complete([
+        TeamEvent(
+            key: '2026new',
+            name: 'Latest Regional',
+            start: DateTime(2026, 4, 1)),
+        TeamEvent(
+            key: '2026early',
+            name: 'Earlier Regional',
+            start: DateTime(2026, 3, 1)),
+      ]);
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.text('Earlier Regional')).dy,
+          greaterThan(tester.getTopLeft(find.text('Latest Regional')).dy));
+      expect(find.text('2026 REBUILT \u00b7 Newest to oldest'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Earlier Regional'));
+      await tester.pumpAndSettle();
+      expect(destination, '/event/2026early');
+      expect(find.byType(TeamEventsDialog), findsNothing);
+      expect(find.text('Selected event page'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      rankings.dispose();
+    });
+  }
+
+  testWidgets(
+      'event history can retry a failed request and dismiss an empty history',
+      (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildMatteTheme(),
+      home: Builder(
+          builder: (context) => Scaffold(
+                  body: TextButton(
+                onPressed: () => showDialog<String>(
+                  context: context,
+                  builder: (_) => TeamEventsDialog(
+                    team: page(0).teams.first,
+                    load: () async {
+                      if (++calls == 1) throw Exception('Offline');
+                      return [];
+                    },
+                  ),
+                ),
+                child: const Text('Open history'),
+              ))),
+    ));
+    await tester.tap(find.text('Open history'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not load event history.'), findsOneWidget);
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(find.text('No event history found.'), findsOneWidget);
+    expect(calls, 2);
+    await tester.tap(find.byTooltip('Close event history'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TeamEventsDialog), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

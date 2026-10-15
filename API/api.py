@@ -259,6 +259,90 @@ def get_global_rankings(
         raise HTTPException(status_code=410, detail="Rankings updated; reload the first page") from error
 
 
+def get_championship_participants(event_key: str) -> set[str]:
+    """Use the advancing alliances, not the championship-wide team list."""
+    cache_key = f'championship-participants:{event_key}'
+    cached = ETagsCollection.find_one({'key': cache_key}, {'_id': 0}) or {}
+    participants = cached.get('participant_keys')
+    checked_at = cached.get('participants_checked_at', 0)
+    now = now_utc().timestamp()
+    if participants is not None and 0 <= now - checked_at < CACHE_UPDATE_INTERVAL_SECONDS:
+        return set(participants)
+
+    alliances = get_tba_json(
+        f'event/{event_key}/alliances',
+        default=None, expected_type=list, timeout=6,
+    )
+    if alliances is None:
+        if participants is not None:
+            return set(participants)
+        raise HTTPException(status_code=502, detail='Could not verify championship participants')
+
+    participants = set()
+    for alliance in alliances:
+        if not isinstance(alliance, dict):
+            continue
+        participants.update(alliance.get('picks') or [])
+        backup = alliance.get('backup') or {}
+        participants.update(key for key in (backup.get('in'), backup.get('out')) if key)
+    ETagsCollection.update_one(
+        {'key': cache_key},
+        {'$set': {'participant_keys': sorted(participants), 'participants_checked_at': now}},
+        upsert=True,
+    )
+    return participants
+
+
+@app.get('/teams/{team}/events', tags=['stats'])
+def get_team_events(team: int):
+    """Return attended events for the REBUILT season, newest first."""
+    if team <= 0:
+        raise HTTPException(status_code=400, detail='Invalid team')
+    cache_key = f'team-events:{YEAR}:{team}'
+    cached = ETagsCollection.find_one({'key': cache_key}, {'_id': 0}) or {}
+    events = cached.get('events')
+    today = now_utc().date().isoformat()
+    if events is None or cached.get('events_date') != today:
+        fetched = get_tba_json(
+            f'team/frc{team}/events/{YEAR}/simple',
+            default=None, expected_type=list, timeout=15,
+        )
+        if fetched is None:
+            if events is None:
+                raise HTTPException(status_code=502, detail='Could not load team events')
+        else:
+            unique = {}
+            for event in fetched:
+                if not isinstance(event, dict):
+                    continue
+                key = event.get('key')
+                if not isinstance(key, str) or not re.fullmatch(r'\d{4}[a-z0-9]+', key):
+                    continue
+                unique[key] = {
+                    'key': key,
+                    'name': event.get('name') or key,
+                    **{field: event.get(field) for field in (
+                        'start_date', 'end_date', 'city', 'state_prov', 'country', 'event_type',
+                    )},
+                }
+            events = list(unique.values())
+            ETagsCollection.update_one(
+                {'key': cache_key},
+                {'$set': {'events': events, 'events_date': today}},
+                upsert=True,
+            )
+    history = [event for event in events
+               if event['key'].startswith(YEAR)
+               and (event.get('start_date') or f"{event['key'][:4]}-12-31") <= today]
+    history = [event for event in history
+               if not (event.get('event_type') == 4
+                       or event['key'] == f'{YEAR}cmptx'
+                       or 'einstein' in event.get('name', '').lower())
+               or f'frc{team}' in get_championship_participants(event['key'])]
+    history.sort(key=lambda event: (event.get('start_date') or '', event['key']), reverse=True)
+    return {'team': team, 'data': history}
+
+
 @app.get('/teams/{team}/identity', tags=['stats'])
 def get_team_identity(team: int, year: int = 2026):
     """Cache public team names and avatar logos separately from event stats."""
