@@ -8,6 +8,7 @@ import 'package:app/widgets/FollowUps.dart';
 import 'package:app/widgets/PitScoutingTeamPage.dart';
 import 'package:app/widgets/RobotImageCapturePage.dart';
 import 'package:app/widgets/matte_theme.dart';
+import 'package:app/widgets/snowfall.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:provider/provider.dart';
@@ -36,7 +37,7 @@ class MyApp extends StatelessWidget {
       title: 'Polar Forecast',
       theme: buildMatteTheme(),
       builder: (context, child) => MatteBackground(
-        child: child ?? const SizedBox.shrink(),
+        child: Snowfall(child: child ?? const SizedBox.shrink()),
       ),
       home: const HomePage(),
       onGenerateRoute: (settings) {
@@ -45,7 +46,15 @@ class MyApp extends StatelessWidget {
         if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'event') {
           return MaterialPageRoute(
             settings: settings,
-            builder: (_) => EventPage(eventCode: uri.pathSegments[1]),
+            builder: (_) => EventPage(
+                eventCode: uri.pathSegments[1],
+                initialSection: const {
+                      'stats': 0,
+                      'matches': 2,
+                      'scout': 5,
+                      'pit': 6
+                    }[uri.queryParameters['section']] ??
+                    0),
           );
         }
 

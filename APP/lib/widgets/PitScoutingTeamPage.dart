@@ -1,7 +1,9 @@
-import 'dart:math';
+import 'dart:math' show min;
 
 import 'package:app/APIService.dart';
 import 'package:app/models/2026Pitscouting.dart';
+import 'package:app/models/auto_route.dart';
+import 'package:app/widgets/auto_path_recorder.dart';
 import 'package:app/models/scout_info.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/PolarForecastAppBar.dart';
@@ -34,25 +36,22 @@ class _EditableAutoPath {
 }
 
 class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
-  static const Set<String> _preloadLocations = {
-    'Preload Left',
-    'Preload Center',
-    'Preload Right',
-    // Kept for validation of routines saved before the label was corrected.
-    'Start Left',
-    'Start Center',
-    'Start Right',
-  };
-  static const Set<String> _fieldCrossings = {
-    'Went Under Left Trench',
-    'Went Over Left Bump',
-    'Went Over Right Bump',
-    'Went Under Right Trench',
-  };
   final TextEditingController _favoriteRobotPartController =
       TextEditingController();
   final TextEditingController _commentController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final _formSections = List.generate(4, (_) => GlobalKey());
+
+  void _jumpToSection(int section) {
+    FocusScope.of(context).unfocus();
+    final target = _formSections[section].currentContext;
+    if (target != null)
+      Scrollable.ensureVisible(target,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
+          alignment: 0);
+  }
 
   bool _trench = false;
   bool _bump = false;
@@ -72,9 +71,6 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
   ];
 
   int _selectedAutoPathIndex = 0;
-
-  static const double _fieldWidthUnits = 1000;
-  static const double _fieldHeightUnits = 500;
 
   static const List<String> _shooterTypes = <String>[
     'Turret',
@@ -330,75 +326,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
     });
   }
 
-  void _addAutoStep(String step) {
-    if (!_canAddAutoStep(step)) return;
-    setState(() {
-      _selectedAutoPath.steps.add(step);
-    });
-  }
-
-  String? get _lastAutoMovement {
-    for (final step in _selectedAutoPath.steps.reversed) {
-      if (step != 'Shot at Hub') return step;
-    }
-    return null;
-  }
-
-  bool _canAddAutoStep(String step) {
-    final steps = _selectedAutoPath.steps;
-    if (_preloadLocations.contains(step)) return steps.isEmpty;
-    if (steps.isEmpty || !_preloadLocations.contains(steps.first)) {
-      return false;
-    }
-    if (step == 'Shot at Hub') return true;
-    if (step == 'Intaked at Neutral Zone') {
-      return _fieldCrossings.contains(_lastAutoMovement);
-    }
-    if (step == 'Intaked At Depot' &&
-        _lastAutoMovement == 'Intaked at Neutral Zone') {
-      return false;
-    }
-    return _lastAutoMovement != step;
-  }
-
-  String? _validateAutoSteps(List<String> steps) {
-    if (steps.isEmpty) return null;
-    if (!_preloadLocations.contains(steps.first)) {
-      return 'choose a preload location first.';
-    }
-    String? lastMovement = steps.first;
-    for (final step in steps.skip(1)) {
-      if (_preloadLocations.contains(step)) {
-        return 'only one preload location is allowed.';
-      }
-      if (step == 'Intaked at Neutral Zone' &&
-          !_fieldCrossings.contains(lastMovement)) {
-        return 'select a trench or bump before the neutral zone.';
-      }
-      if (step == 'Intaked At Depot' &&
-          lastMovement == 'Intaked at Neutral Zone') {
-        return 'cross the field barrier before returning to the depot.';
-      }
-      if (step != 'Shot at Hub') lastMovement = step;
-    }
-    return null;
-  }
-
-  void _moveAutoStep(_EditableAutoPath path, int index, int delta) {
-    final candidate = List<String>.from(path.steps);
-    final step = candidate.removeAt(index);
-    candidate.insert(index + delta, step);
-    final error = _validateAutoSteps(candidate);
-    if (error != null) {
-      _showMessage('That order is not a possible auto: $error');
-      return;
-    }
-    setState(() {
-      path.steps
-        ..clear()
-        ..addAll(candidate);
-    });
-  }
+  String? _validateAutoSteps(List<String> steps) => AutoRoute.validate(steps);
 
   @override
   void dispose() {
@@ -412,30 +340,63 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: PolarForecastAppBar(),
+      appBar: PolarForecastAppBar(
+          extraText: 'Pit scouting · Team ${widget.teamNumber}'),
       body: SafeArea(
         child: Column(
           children: [
+            Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (var i = 0; i < 4; i++)
+                        Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(
+                              avatar: Icon(
+                                  [
+                                    Icons.settings_outlined,
+                                    Icons.route_rounded,
+                                    Icons.speed_rounded,
+                                    Icons.notes_rounded
+                                  ][i],
+                                  size: 16),
+                              label: Text([
+                                'Robot',
+                                'Auto routines',
+                                'Driver & scoring',
+                                'Notes'
+                              ][i]),
+                              onPressed: () => _jumpToSection(i),
+                            )),
+                    ]))),
             Expanded(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                 children: [
                   _buildHeaderCard(),
                   const SizedBox(height: 16),
-                  _buildFieldAccessCard(),
+                  KeyedSubtree(
+                      key: _formSections[0], child: _buildFieldAccessCard()),
                   const SizedBox(height: 16),
                   _buildRobotConfigurationCard(),
                   const SizedBox(height: 16),
-                  _buildAutonomousPathsCard(),
+                  KeyedSubtree(
+                      key: _formSections[1],
+                      child: _buildAutonomousPathsCard()),
                   const SizedBox(height: 16),
-                  _buildDriverExperienceCard(),
+                  KeyedSubtree(
+                      key: _formSections[2],
+                      child: _buildDriverExperienceCard()),
                   const SizedBox(height: 16),
                   _buildBPSCard(),
                   const SizedBox(height: 16),
                   _buildFavoriteRobotPartCard(),
                   const SizedBox(height: 16),
-                  _buildCommentsCard(),
+                  KeyedSubtree(
+                      key: _formSections[3], child: _buildCommentsCard()),
                 ],
               ),
             ),
@@ -590,8 +551,7 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
     return _buildSection(
       icon: Icons.alt_route_rounded,
       title: 'Autonomous Paths',
-      subtitle:
-          'Create multiple routines and tap field locations in travel order.',
+      subtitle: 'Build each routine with the same recorder used in the stands.',
       children: [
         Row(
           children: [
@@ -734,18 +694,6 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
               ),
               const SizedBox(width: 7),
               _smallActionButton(
-                tooltip: 'Undo last action',
-                icon: Icons.undo_rounded,
-                onPressed: _selectedAutoPath.steps.isEmpty
-                    ? null
-                    : () {
-                        setState(() {
-                          _selectedAutoPath.steps.removeLast();
-                        });
-                      },
-              ),
-              const SizedBox(width: 7),
-              _smallActionButton(
                 tooltip: 'Delete path',
                 icon: Icons.delete_outline_rounded,
                 foregroundColor: Colors.redAccent,
@@ -756,451 +704,21 @@ class _PitScoutingTeamPageState extends State<PitScoutingTeamPage> {
         ),
         const SizedBox(height: 14),
         _buildAutoField(),
-        const SizedBox(height: 14),
-        _buildAutoPathPreview(),
       ],
     );
   }
 
-  Widget _buildAutoField() {
-    const accent = Colors.blueAccent;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenWidth = MediaQuery.sizeOf(context).width;
-        final isPhone = screenWidth < 600;
-
-        final displayWidth = isPhone
-            ? constraints.maxWidth
-            : constraints.maxWidth.clamp(340.0, 560.0).toDouble();
-
-        final displayHeight = displayWidth * 1.9;
-
-        return Center(
-          child: Container(
-            width: displayWidth,
-            height: displayHeight,
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: const Color(0xFF101216),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: accent.withValues(alpha: 0.50),
-                width: 1.4,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
-                ),
-                BoxShadow(
-                  color: accent.withValues(alpha: 0.10),
-                  blurRadius: 28,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: RotatedBox(
-                quarterTurns: 3,
-                child: LayoutBuilder(
-                  builder: (context, fieldConstraints) {
-                    final fieldWidth = fieldConstraints.maxWidth;
-                    final fieldHeight = fieldConstraints.maxHeight;
-
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        const ColoredBox(color: Color(0xFF090A0D)),
-                        Image.asset(
-                          'assets/2026FRCFeildImageFull.png',
-                          width: fieldWidth,
-                          height: fieldHeight,
-                          fit: BoxFit.contain,
-                          alignment: Alignment.center,
-                          filterQuality: FilterQuality.high,
-                        ),
-                        IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.04),
-                                  Colors.transparent,
-                                  Colors.black.withValues(alpha: 0.12),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        ..._buildSharedFieldButtons(
-                          width: fieldWidth,
-                          height: fieldHeight,
-                        ),
-                        IgnorePointer(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.14),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  List<Widget> _buildSharedFieldButtons({
-    required double width,
-    required double height,
-  }) {
-    final buttonSize = (width * 0.07).clamp(42.0, 88.0).toDouble();
-
-    return [
-      _buildFieldButton(
-        x: 90,
-        y: 105,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Left',
-        label: 'Preload L',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 90,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Center',
-        label: 'Preload C',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 90,
-        y: 395,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Right',
-        label: 'Preload R',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 260,
-        y: 130,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Intaked At Depot',
-        label: 'Depot',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 40,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Went Under Left Trench',
-        label: 'Left Trench',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 150,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Went Over Left Bump',
-        label: 'Left Bump',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 350,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Went Over Right Bump',
-        label: 'Right Bump',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 500,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Went Under Right Trench',
-        label: 'Right Trench',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 530,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Shot at Hub',
-        label: 'Hub',
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 730,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Intaked at Neutral Zone',
-        label: 'Neutral Zone',
-        size: buttonSize,
-      ),
-    ];
-  }
-
-  Widget _buildFieldButton({
-    required double x,
-    required double y,
-    required double fieldPixelWidth,
-    required double fieldPixelHeight,
-    required String value,
-    required String label,
-    required double size,
-  }) {
-    final enabled = _canAddAutoStep(value);
-    final px = (x / _fieldWidthUnits) * fieldPixelWidth;
-    final py = (y / _fieldHeightUnits) * fieldPixelHeight;
-
-    final left =
-        (px - size / 2).clamp(0.0, max(0.0, fieldPixelWidth - size)).toDouble();
-    final top = (py - size / 2)
-        .clamp(0.0, max(0.0, fieldPixelHeight - size))
-        .toDouble();
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: Tooltip(
-        message: enabled
-            ? value
-            : (_selectedAutoPath.steps.isEmpty
-                ? 'Choose a preload location first'
-                : 'That move is not possible from the current location'),
-        child: Material(
-          color: enabled
-              ? Colors.blueAccent.withValues(alpha: 0.95)
-              : Colors.blueGrey.withValues(alpha: 0.62),
-          shape: const CircleBorder(),
-          elevation: 5,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: enabled ? () => _addAutoStep(value) : null,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: RotatedBox(
-                quarterTurns: 1,
-                child: Center(
-                  child: FittedBox(
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Text(
-                        label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAutoPathPreview() {
-    final path = _selectedAutoPath;
-
-    if (path.steps.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 20,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.055),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Column(
-          children: [
-            const Icon(
-              Icons.route_outlined,
-              color: Colors.white38,
-              size: 32,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${path.name} has no actions yet.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
+  Widget _buildAutoField() => AutoPathRecorder(
+        key: ObjectKey(_selectedAutoPath),
+        path: _selectedAutoPath.steps,
+        title: _selectedAutoPath.name,
+        enabled: !_isLoading,
+        onChanged: (path) => setState(() {
+          _selectedAutoPath.steps
+            ..clear()
+            ..addAll(path);
+        }),
       );
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.055),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.blueAccent.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${path.name} (${path.steps.length})',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () {
-                  setState(() => path.steps.clear());
-                },
-                icon: const Icon(
-                  Icons.delete_sweep_outlined,
-                  size: 18,
-                ),
-                label: const Text('Clear'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.redAccent,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...List.generate(path.steps.length, (index) {
-            final item = path.steps[index];
-            final isLast = index == path.steps.length - 1;
-
-            return Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
-              child: Container(
-                width: double.infinity,
-                constraints: const BoxConstraints(minHeight: 64),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.blueAccent.withValues(alpha: 0.30),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: Colors.blueAccent,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${index + 1}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        item,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Move up',
-                      onPressed: index == 0
-                          ? null
-                          : () {
-                              _moveAutoStep(path, index, -1);
-                            },
-                      icon: const Icon(Icons.keyboard_arrow_up_rounded),
-                      color: Colors.white60,
-                    ),
-                    IconButton(
-                      tooltip: 'Move down',
-                      onPressed: index == path.steps.length - 1
-                          ? null
-                          : () {
-                              _moveAutoStep(path, index, 1);
-                            },
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                      color: Colors.white60,
-                    ),
-                    IconButton(
-                      tooltip: 'Remove step',
-                      onPressed: () {
-                        setState(() {
-                          if (index == 0 && _preloadLocations.contains(item)) {
-                            path.steps.clear();
-                          } else {
-                            path.steps.removeAt(index);
-                          }
-                        });
-                      },
-                      icon: const Icon(Icons.close_rounded),
-                      color: Colors.redAccent,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
 
   Widget _buildBPSCard() {
     return _buildSection(

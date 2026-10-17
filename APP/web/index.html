@@ -17,22 +17,29 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
+  <meta name="theme-color" content="#0B111B">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="PolarForecast: FRC scouting, team statistics, match strategy, and alliance selection.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="app">
+  <meta name="apple-mobile-web-app-title" content="PolarForecast">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>app</title>
+  <title>PolarForecast | Scout. Strategize. Select.</title>
   <link rel="manifest" href="manifest.json">
 </head>
-<body>
+<body style="margin:0;background:#0B111B;color:#F0F5FA;font-family:system-ui,sans-serif;">
+  <div id="app-loading" role="status" style="position:fixed;inset:0;display:grid;place-content:center;text-align:center;gap:12px;">
+    <img src="icons/Icon-192.png" alt="" width="64" height="64" style="margin:auto;border-radius:16px;">
+    <strong style="font-size:22px;">PolarForecast</strong>
+    <span style="font-size:13px;color:#A4B3C5;">Preparing your competition workspace…</span>
+  </div>
+  <script>window.addEventListener('flutter-first-frame',function(){document.getElementById('app-loading')?.remove();});</script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

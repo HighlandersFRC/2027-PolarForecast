@@ -45,7 +45,7 @@ class _GroupPageState extends State<GroupPage> {
 
         return Scaffold(
           backgroundColor: Colors.transparent,
-          extendBody: true,
+          extendBody: false,
           appBar: PolarForecastAppBar(
             extraText: groupName,
           ),
@@ -138,7 +138,7 @@ class _GroupPageState extends State<GroupPage> {
   }
 }
 
-class _GroupContent extends StatelessWidget {
+class _GroupContent extends StatefulWidget {
   final int selectedIndex;
   final String groupName;
   final String groupId;
@@ -158,7 +158,26 @@ class _GroupContent extends StatelessWidget {
   });
 
   @override
+  State<_GroupContent> createState() => _GroupContentState();
+}
+
+class _GroupContentState extends State<_GroupContent> {
+  final APIService _api = APIService();
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final selectedIndex = widget.selectedIndex;
+    final groupName = widget.groupName;
+    final groupId = widget.groupId;
+    final role = widget.role;
+    final currentUsername = widget.currentUsername;
+    final isAdmin = widget.isAdmin;
+    final isOwner = widget.isOwner;
     return Column(
       children: [
         _GroupHero(
@@ -171,13 +190,13 @@ class _GroupContent extends StatelessWidget {
             index: selectedIndex,
             children: [
               _GroupEventsView(
-                api: APIService(),
+                api: _api,
                 groupId: groupId,
                 groupName: groupName,
                 isAdmin: isAdmin,
               ),
               _GroupPeopleView(
-                api: APIService(),
+                api: _api,
                 groupId: groupId,
                 requesterUsername: currentUsername,
                 isOwner: isOwner,
@@ -194,103 +213,46 @@ class _GroupHero extends StatelessWidget {
   final String groupName;
   final String role;
   final int selectedIndex;
-
-  const _GroupHero({
-    required this.groupName,
-    required this.role,
-    required this.selectedIndex,
-  });
-
+  const _GroupHero(
+      {required this.groupName,
+      required this.role,
+      required this.selectedIndex});
   @override
-  Widget build(BuildContext context) {
-    final pageTitle =
-        selectedIndex == 0 ? 'Event workspace' : 'Scout directory';
-    final pageDescription = selectedIndex == 0
-        ? 'Open scouting events, organize your schedule, and keep the team focused.'
-        : 'Manage scouts, review permissions, and share the team join code.';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: SizedBox(
-        width: double.infinity,
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
         child: MattePanel(
-          padding: const EdgeInsets.all(22),
-          borderRadius: BorderRadius.circular(24),
-          tint: AppColors.secondary,
-          child: Wrap(
-            spacing: 18,
-            runSpacing: 16,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            alignment: WrapAlignment.spaceBetween,
-            children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 720),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: _PolarColors.primary.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(17),
-                        border: Border.all(
-                          color: _PolarColors.primary.withOpacity(0.32),
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.ac_unit_rounded,
-                        color: _PolarColors.primary,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            groupName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            pageTitle,
-                            style: const TextStyle(
-                              color: _PolarColors.primary,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            pageDescription,
-                            style: const TextStyle(
-                              color: _PolarColors.mutedText,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            padding: const EdgeInsets.all(16),
+            child: Row(children: [
+              Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.ac_unit_rounded,
+                      color: AppColors.primary)),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(groupName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 22, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 3),
+                    Text(
+                        selectedIndex == 0
+                            ? 'Choose an event. Start scouting.'
+                            : 'Your scouts, roles, and invitation code.',
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 12)),
+                  ])),
+              const SizedBox(width: 8),
               _RoleBadge(role: role),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+            ])),
+      );
 }
 
 class _DesktopNavigation extends StatelessWidget {
@@ -517,6 +479,14 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
   late Future<_EventsPayload> _payloadFuture;
   final Set<String> _busyEventCodes = <String>{};
   bool _addingEvent = false;
+  final _eventSearch = TextEditingController();
+  String _eventQuery = '';
+
+  @override
+  void dispose() {
+    _eventSearch.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -577,12 +547,20 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
           for (final key in payload.eventKeys) key.key: key,
         };
 
-        final events = List<String>.from(payload.groupEvents.events)
+        final allEvents = List<String>.from(payload.groupEvents.events)
           ..sort((a, b) {
             final aName = eventMap[a]?.display ?? a;
             final bName = eventMap[b]?.display ?? b;
             return aName.toLowerCase().compareTo(bName.toLowerCase());
           });
+
+        final events = allEvents
+            .where((key) =>
+                _eventQuery.isEmpty ||
+                '$key ${eventMap[key]?.display ?? ''}'
+                    .toLowerCase()
+                    .contains(_eventQuery))
+            .toList();
 
         return RefreshIndicator(
           color: _PolarColors.primary,
@@ -599,16 +577,37 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
                     title: 'Team events',
                     description: widget.isAdmin
                         ? 'Open an event or update which competitions are available to your scouts.'
-                        : 'Open an event to view statistics, predictions, and scouting forms.',
+                        : 'Open match or pit scouting directly from your event.',
                     trailing: _CountPill(
-                      count: events.length,
+                      count: allEvents.length,
                       singular: 'event',
                       plural: 'events',
                     ),
                   ),
                 ),
               ),
-              if (events.isEmpty)
+              SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                  sliver: SliverToBoxAdapter(
+                      child: TextField(
+                    controller: _eventSearch,
+                    onChanged: (query) => setState(
+                        () => _eventQuery = query.trim().toLowerCase()),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                        hintText: 'Find a team event',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: _eventQuery.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear event search',
+                                onPressed: () => setState(() {
+                                      _eventSearch.clear();
+                                      _eventQuery = '';
+                                    }),
+                                icon: const Icon(Icons.close_rounded))),
+                  ))),
+              if (allEvents.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _EmptyState(
@@ -622,7 +621,7 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
                             onPressed: _addingEvent
                                 ? null
                                 : () => _addEvent(
-                                      events.toSet(),
+                                      allEvents.toSet(),
                                       payload.eventKeys,
                                     ),
                             icon: _addingEvent
@@ -642,6 +641,13 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
                         : null,
                   ),
                 )
+              else if (events.isEmpty)
+                const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyState(
+                        icon: Icons.search_off_rounded,
+                        title: 'No matching events',
+                        message: 'Try another event name or code.'))
               else ...[
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -683,13 +689,13 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
                 ),
                 if (widget.isAdmin)
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                     sliver: SliverToBoxAdapter(
                       child: FilledButton.icon(
                         onPressed: _addingEvent
                             ? null
                             : () => _addEvent(
-                                  events.toSet(),
+                                  allEvents.toSet(),
                                   payload.eventKeys,
                                 ),
                         icon: _addingEvent
@@ -712,7 +718,7 @@ class _GroupEventsViewState extends State<_GroupEventsView> {
                   )
                 else
                   const SliverPadding(
-                    padding: EdgeInsets.only(bottom: 110),
+                    padding: EdgeInsets.only(bottom: 24),
                   ),
               ],
             ],
@@ -1178,108 +1184,68 @@ class _EventCard extends StatelessWidget {
   final bool busy;
   final VoidCallback? onOpen;
   final VoidCallback? onRemove;
-
-  const _EventCard({
-    required this.eventCode,
-    required this.displayName,
-    required this.canRemove,
-    required this.busy,
-    required this.onOpen,
-    required this.onRemove,
-  });
-
+  const _EventCard(
+      {required this.eventCode,
+      required this.displayName,
+      required this.canRemove,
+      required this.busy,
+      required this.onOpen,
+      required this.onRemove});
   @override
-  Widget build(BuildContext context) {
-    return MattePanel(
-      borderRadius: BorderRadius.circular(20),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onOpen,
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _PolarColors.border),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: _PolarColors.primarySoft,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.stadium_rounded,
-                    color: _PolarColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayName,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        eventCode.toUpperCase(),
-                        style: const TextStyle(
-                          color: _PolarColors.mutedText,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (busy)
-                  const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: SizedBox(
-                      width: 21,
-                      height: 21,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: _PolarColors.primary,
-                      ),
-                    ),
-                  )
-                else ...[
-                  if (canRemove)
-                    IconButton(
-                      tooltip: 'Remove event',
-                      onPressed: onRemove,
-                      icon: const Icon(
-                        Icons.delete_outline_rounded,
-                        color: _PolarColors.danger,
-                      ),
-                    ),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: _PolarColors.subtleText,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => MattePanel(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Icon(Icons.stadium_rounded, color: AppColors.primary, size: 25),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(displayName,
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text(eventCode.toUpperCase(),
+                    style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                        letterSpacing: 0.8)),
+              ])),
+          if (busy)
+            const SizedBox.square(
+                dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+          else if (canRemove)
+            PopupMenuButton<String>(
+                tooltip: 'Event options',
+                onSelected: (_) => onRemove?.call(),
+                itemBuilder: (_) => const [
+                      PopupMenuItem(
+                          value: 'remove', child: Text('Remove from group'))
+                    ]),
+        ]),
+        const SizedBox(height: 14),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => Navigator.pushNamed(
+                      context, '/event/$eventCode?section=scout'),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: const Text('Scout match')),
+          OutlinedButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => Navigator.pushNamed(
+                      context, '/event/$eventCode?section=pit'),
+              icon: const Icon(Icons.assignment_outlined, size: 18),
+              label: const Text('Scout pit')),
+          TextButton.icon(
+              onPressed: onOpen,
+              icon: const Icon(Icons.leaderboard_outlined, size: 18),
+              label: const Text('Stats')),
+        ]),
+      ]));
 }
 
 class _GroupPeopleView extends StatefulWidget {
@@ -1496,7 +1462,7 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   sliver: SliverToBoxAdapter(
                     child: Column(
                       children: [

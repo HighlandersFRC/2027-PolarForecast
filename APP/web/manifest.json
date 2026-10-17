@@ -1,12 +1,12 @@
 {
-    "name": "app",
-    "short_name": "app",
+    "name": "PolarForecast",
+    "short_name": "PolarForecast",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0B111B",
+    "theme_color": "#0B111B",
+    "description": "FRC scouting, strategy, and alliance selection.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

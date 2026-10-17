@@ -17,8 +17,6 @@ class PolarForecastAppBar extends StatelessWidget
     this.showAccountAction = true,
   }) : super(key: key);
 
-  static const Color _accent = Color(0xFF72A7FF);
-
   @override
   Size get preferredSize => const Size.fromHeight(60);
 
@@ -30,9 +28,6 @@ class PolarForecastAppBar extends StatelessWidget
   @override
   Widget build(BuildContext context) {
     final bool isMobile = MediaQuery.sizeOf(context).width < 600;
-    final String title = formattedExtraText.isEmpty
-        ? 'Polar Forecast'
-        : 'Polar Forecast \u2022 $formattedExtraText';
 
     return AppBar(
       toolbarHeight: 60,
@@ -48,45 +43,40 @@ class PolarForecastAppBar extends StatelessWidget
           width: 1,
         ),
       ),
-      title: Row(
-        children: [
-          Container(
-            width: isMobile ? 36 : 40,
-            height: isMobile ? 36 : 40,
-            padding: const EdgeInsets.all(5),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.10),
-              ),
-            ),
-            child: Image.asset(
-              'assets/PolarBearHead.png',
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => const Icon(
-                Icons.ac_unit_rounded,
-                color: _accent,
-                size: 22,
-              ),
-            ),
-          ),
-          SizedBox(width: isMobile ? 9 : 12),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: isMobile ? 16 : 19,
-                fontWeight: FontWeight.w700,
-                letterSpacing: isMobile ? 0.2 : 0.6,
-              ),
-            ),
-          ),
-        ],
+      title: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => Navigator.of(context)
+            .pushNamedAndRemoveUntil('/', (route) => false),
+        child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              Image.asset('assets/PolarBearHead.png',
+                  width: isMobile ? 30 : 36,
+                  height: isMobile ? 30 : 36,
+                  errorBuilder: (_, __, ___) => const Icon(
+                      Icons.ac_unit_rounded,
+                      color: AppColors.primary)),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('Polar Forecast',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: isMobile ? 16 : 19,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3)),
+                    if (formattedExtraText.isNotEmpty)
+                      Text(formattedExtraText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppColors.textMuted, fontSize: 11)),
+                  ])),
+            ])),
       ),
       actions: [
         if (showSearchAction)
@@ -167,8 +157,8 @@ class _AppBarAction extends StatelessWidget {
         onPressed: onPressed,
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints(
-          minWidth: 42,
-          minHeight: 42,
+          minWidth: 44,
+          minHeight: 44,
         ),
         style: IconButton.styleFrom(
           foregroundColor: Colors.white,

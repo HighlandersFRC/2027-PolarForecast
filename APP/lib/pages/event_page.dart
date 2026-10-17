@@ -14,6 +14,8 @@ import 'package:app/widgets/PolarForecastAppBar.dart';
 import 'package:app/widgets/DataSourceBanner.dart';
 import 'package:app/widgets/matte_theme.dart';
 import 'package:app/widgets/event_stats_grid.dart';
+import 'package:app/widgets/team_comparison.dart';
+import 'package:app/services/recent_events.dart';
 import 'package:app/widgets/scout_stats_view.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -28,10 +30,14 @@ const Color _accentColor = Color(0xFF4DA3FF);
 
 class EventPage extends StatefulWidget {
   final String eventCode;
+  final APIService? apiService;
+  final int initialSection;
 
   const EventPage({
     super.key,
     required this.eventCode,
+    this.apiService,
+    this.initialSection = 0,
   });
 
   @override
@@ -39,12 +45,13 @@ class EventPage extends StatefulWidget {
 }
 
 class _EventPageState extends State<EventPage> {
-  final APIService _apiService = APIService();
+  late final APIService _apiService;
 
   late LiveDataController<EventData> _eventData;
   late final String _apiEventKey;
 
   int _selectedIndex = 0;
+  bool _scoutingOpened = false;
   bool _isRefreshing = false;
   bool _authStateInitialized = false;
 
@@ -55,8 +62,14 @@ class _EventPageState extends State<EventPage> {
   @override
   void initState() {
     super.initState();
+    _apiService = widget.apiService ?? APIService();
+    _selectedIndex = const {0, 1, 2, 3, 5, 6, 7}.contains(widget.initialSection)
+        ? widget.initialSection
+        : 0;
+    _scoutingOpened = _selectedIndex == 5;
 
     _apiEventKey = _eventKeyForApi(widget.eventCode);
+    RecentEvents.remember(_apiEventKey);
 
     _loadEventName();
   }
@@ -215,62 +228,105 @@ class _EventPageState extends State<EventPage> {
       children: [
         const DataSourceBanner(),
         Expanded(
-          child: ValueListenableBuilder<AsyncSnapshot<EventData>>(
-            valueListenable: _eventData,
-            builder: (context, snapshot, _) {
-              // Event stats refresh independently of the active scouting form.
-              // Replacing it with loading/error UI would dispose its draft.
-              if (_selectedIndex == 5) {
-                return MatchScouting(
-                  event: _apiEventKey,
-                  onSubmitted: _onScoutingSubmitted,
-                );
-              }
+          child: IndexedStack(
+            index: _selectedIndex == 5 ? 1 : 0,
+            children: [
+              ValueListenableBuilder<AsyncSnapshot<EventData>>(
+                valueListenable: _eventData,
+                builder: (context, snapshot, _) {
+                  // Event stats refresh independently of the active scouting form.
+                  // Replacing it with loading/error UI would dispose its draft.
+                  if (_selectedIndex == 5) {
+                    return const SizedBox.shrink();
+                  }
 
-              if (_selectedIndex == 7) {
-                if (_statsUsername == null || _pitGroupId == null) {
-                  return const _EmptyState(
-                    icon: Icons.groups_outlined,
-                    title: 'Group required',
-                    message: 'Log in and join a group to view scout stats.',
-                  );
-                }
-                return ScoutStatsView(
-                  key: ValueKey('$_pitGroupId-$_statsUsername-$_apiEventKey'),
-                  eventKey: _apiEventKey,
-                  groupId: _pitGroupId!,
-                  username: _statsUsername!,
-                );
-              }
+                  if (_selectedIndex == 7) {
+                    if (_statsUsername == null || _pitGroupId == null) {
+                      return const _EmptyState(
+                        icon: Icons.groups_outlined,
+                        title: 'Group required',
+                        message: 'Log in and join a group to view scout stats.',
+                      );
+                    }
+                    return ScoutStatsView(
+                      key: ValueKey(
+                          '$_pitGroupId-$_statsUsername-$_apiEventKey'),
+                      eventKey: _apiEventKey,
+                      groupId: _pitGroupId!,
+                      username: _statsUsername!,
+                    );
+                  }
 
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const _PageLoadingState();
-              }
+                  if (_selectedIndex == 6) {
+                    final username = _statsUsername;
+                    final groupId = _pitGroupId;
 
-              if (snapshot.hasError) {
-                return _EmptyState(
-                  icon: Icons.cloud_off_rounded,
-                  title: 'Could not load ${widget.eventCode}',
-                  message: snapshot.error.toString(),
-                  actionLabel: 'Try again',
-                  onAction: _refreshPage,
-                );
-              }
+                    if (username == null) {
+                      return const _EmptyState(
+                        icon: Icons.login_rounded,
+                        title: 'Login required',
+                        message:
+                            'Log in to view your group pit scouting progress.',
+                      );
+                    }
 
-              final data = snapshot.data;
+                    if (groupId == null) {
+                      return const _EmptyState(
+                        icon: Icons.group_off_rounded,
+                        title: 'No group found',
+                        message:
+                            'Join a group before viewing pit scouting progress.',
+                      );
+                    }
 
-              if (data == null) {
-                return _EmptyState(
-                  icon: Icons.inbox_outlined,
-                  title: 'No event data',
-                  message: 'There is no cached data for this event yet.',
-                  actionLabel: 'Refresh',
-                  onAction: _refreshPage,
-                );
-              }
+                    return PitScouting(
+                      event: _apiEventKey,
+                      groupId: groupId,
+                      username: username,
+                    );
+                  }
 
-              return _buildSelectedPage(data);
-            },
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const _PageLoadingState();
+                  }
+
+                  if (snapshot.hasError) {
+                    return _EmptyState(
+                      icon: Icons.cloud_off_rounded,
+                      title: 'Could not load ${widget.eventCode}',
+                      message: snapshot.error.toString(),
+                      actionLabel: 'Try again',
+                      onAction: _refreshPage,
+                    );
+                  }
+
+                  final data = snapshot.data;
+
+                  if (data == null) {
+                    return _EmptyState(
+                      icon: Icons.inbox_outlined,
+                      title: 'No event data',
+                      message: 'There is no cached data for this event yet.',
+                      actionLabel: 'Refresh',
+                      onAction: _refreshPage,
+                    );
+                  }
+
+                  return _buildSelectedPage(data);
+                },
+              ),
+              if (_scoutingOpened)
+                TickerMode(
+                  enabled: _selectedIndex == 5,
+                  child: MatchScouting(
+                    key: ValueKey('$_apiEventKey-$_statsUsername-$_pitGroupId'),
+                    event: _apiEventKey,
+                    onSubmitted: _onScoutingSubmitted,
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
+            ],
           ),
         ),
       ],
@@ -301,31 +357,6 @@ class _EventPageState extends State<EventPage> {
         );
       case 4:
         return const SizedBox.shrink();
-      case 6:
-        final username = _statsUsername;
-        final groupId = _pitGroupId;
-
-        if (username == null) {
-          return const _EmptyState(
-            icon: Icons.login_rounded,
-            title: 'Login required',
-            message: 'Log in to view your group pit scouting progress.',
-          );
-        }
-
-        if (groupId == null) {
-          return const _EmptyState(
-            icon: Icons.group_off_rounded,
-            title: 'No group found',
-            message: 'Join a group before viewing pit scouting progress.',
-          );
-        }
-
-        return PitScouting(
-          event: _apiEventKey,
-          groupId: groupId,
-          username: username,
-        );
       case 3:
         return _ChartsView(
           eventCode: widget.eventCode,
@@ -337,69 +368,101 @@ class _EventPageState extends State<EventPage> {
   }
 
   Widget _buildBottomNavigation() {
-    return ClipRect(
-      child: NavigationBar(
-        height: 72,
-        backgroundColor: _surfaceColor,
-        indicatorColor: _accentColor.withOpacity(0.16),
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        labelTextStyle: WidgetStateProperty.resolveWith(
-          (states) => TextStyle(
-            color: states.contains(WidgetState.selected)
-                ? Colors.white
-                : Colors.white60,
-            fontWeight: states.contains(WidgetState.selected)
-                ? FontWeight.w700
-                : FontWeight.w500,
-          ),
-        ),
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          _selectEventSection(index);
-        },
-        destinations: const [
-          NavigationDestination(
+    final destination =
+        switch (_selectedIndex) { 0 => 0, 2 => 1, 5 => 2, _ => 4 };
+    return NavigationBar(
+      height: 68,
+      selectedIndex: destination,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      onDestinationSelected: (index) {
+        if (index == 4) {
+          _showMoreSections();
+          return;
+        }
+        _selectEventSection([0, 2, 5, 4][index]);
+      },
+      destinations: const [
+        NavigationDestination(
             icon: Icon(Icons.leaderboard_outlined),
             selectedIcon: Icon(Icons.leaderboard_rounded),
-            label: 'Current',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights_rounded),
-            label: 'Predictions',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.format_list_numbered_outlined),
-            selectedIcon: Icon(Icons.format_list_numbered_rounded),
-            label: 'Quals',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.query_stats_outlined),
-            selectedIcon: Icon(Icons.query_stats_rounded),
-            label: 'Charts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.playlist_add_check_circle_outlined),
-            selectedIcon: Icon(Icons.playlist_add_check_circle_rounded),
-            label: 'Picklist',
-          ),
-          NavigationDestination(
+            label: 'Stats'),
+        NavigationDestination(
+            icon: Icon(Icons.format_list_numbered_rounded), label: 'Matches'),
+        NavigationDestination(
             icon: Icon(Icons.visibility_outlined),
             selectedIcon: Icon(Icons.visibility_rounded),
-            label: 'Match Scouting',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            selectedIcon: Icon(Icons.assignment_rounded),
-            label: 'Pit Scouting',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            selectedIcon: Icon(Icons.groups_rounded),
-            label: 'Scouts',
-          ),
-        ],
-      ),
+            label: 'Scout'),
+        NavigationDestination(
+            icon: Icon(Icons.playlist_add_check_rounded), label: 'Picks'),
+        NavigationDestination(
+            icon: Icon(Icons.more_horiz_rounded), label: 'More'),
+      ],
+    );
+  }
+
+  void _showMoreSections() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+          child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Event tools',
+                      style: TextStyle(
+                          fontSize: 21, fontWeight: FontWeight.w800))),
+              for (final section in [
+                (
+                  6,
+                  'Pit scouting',
+                  'Reports, robot photos, and follow-ups',
+                  Icons.assignment_outlined
+                ),
+                (
+                  2,
+                  'Qualification matches',
+                  'Match schedule and alliance lineups',
+                  Icons.format_list_numbered_rounded
+                ),
+                (
+                  1,
+                  'Predictions',
+                  'Explore projected match outcomes',
+                  Icons.insights_outlined
+                ),
+                (
+                  3,
+                  'Charts',
+                  'Compare event performance visually',
+                  Icons.query_stats_rounded
+                ),
+                (
+                  7,
+                  'Scout activity',
+                  'Review your group scouting coverage',
+                  Icons.groups_outlined
+                ),
+              ])
+                ListTile(
+                  selected: _selectedIndex == section.$1,
+                  leading: Icon(section.$4),
+                  title: Text(section.$2),
+                  subtitle:
+                      Text(section.$3, style: const TextStyle(fontSize: 12)),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _selectEventSection(section.$1);
+                  },
+                ),
+            ]),
+      )),
     );
   }
 
@@ -449,7 +512,7 @@ class _EventPageState extends State<EventPage> {
                       const SizedBox(height: 7),
                       _buildNavigationRailItem(
                         index: 0,
-                        label: 'Current',
+                        label: 'Team stats',
                         icon: Icons.leaderboard_outlined,
                         selectedIcon: Icons.leaderboard_rounded,
                         extended: extended,
@@ -664,7 +727,10 @@ class _EventPageState extends State<EventPage> {
       return;
     }
     final returningToStats = index == 0 && _selectedIndex != 0;
-    setState(() => _selectedIndex = index);
+    setState(() {
+      _selectedIndex = index;
+      if (index == 5) _scoutingOpened = true;
+    });
     if (returningToStats) _eventData.refresh();
   }
 }
@@ -719,6 +785,8 @@ class _StatsViewState extends State<_StatsView> {
   final TextEditingController _searchController = TextEditingController();
 
   String _sortKey = 'rank';
+  bool _comparing = false;
+  final Set<int> _comparison = {};
   String _searchQuery = '';
 
   bool _ascending = true;
@@ -960,7 +1028,48 @@ class _StatsViewState extends State<_StatsView> {
               _buildMobileToolbar(visibleStats)
             else
               _buildToolbar(visibleStats),
-            const SizedBox(height: 12),
+            Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                      onPressed: () => setState(() {
+                            _comparing = !_comparing;
+                            if (!_comparing) _comparison.clear();
+                          }),
+                      icon: Icon(
+                          _comparing
+                              ? Icons.close_rounded
+                              : Icons.compare_arrows_rounded,
+                          size: 18),
+                      label: Text(
+                          _comparing ? 'Done comparing' : 'Compare teams')),
+                  if (_comparing) ...[
+                    for (final team in _comparison)
+                      InputChip(
+                          label: Text('$team'),
+                          onDeleted: () =>
+                              setState(() => _comparison.remove(team))),
+                    FilledButton.tonal(
+                        onPressed: _comparison.length < 2
+                            ? null
+                            : () => showTeamComparison(
+                                context,
+                                widget.stats
+                                    .where((t) => _comparison.contains(t.Team))
+                                    .toList(),
+                                scouting: widget.showScoutingAnalysis),
+                        child: const Text('Compare')),
+                  ],
+                ]),
+            if (_comparing)
+              const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text('Tap up to 3 team rows to compare.',
+                      style:
+                          TextStyle(color: AppColors.textMuted, fontSize: 12))),
+            const SizedBox(height: 4),
             Expanded(
               child: visibleStats.isEmpty
                   ? _buildNoSearchResults()
@@ -972,7 +1081,20 @@ class _StatsViewState extends State<_StatsView> {
                       sortKey: _sortKey,
                       ascending: _ascending,
                       onSort: _sort,
-                      onTeamTap: _goToTeam,
+                      selectedTeams: _comparison,
+                      onTeamTap: (team) {
+                        if (!_comparing) {
+                          _goToTeam(team);
+                          return;
+                        }
+                        setState(() {
+                          if (_comparison.contains(team.Team)) {
+                            _comparison.remove(team.Team);
+                          } else if (_comparison.length < 3) {
+                            _comparison.add(team.Team);
+                          }
+                        });
+                      },
                     ),
             ),
           ],

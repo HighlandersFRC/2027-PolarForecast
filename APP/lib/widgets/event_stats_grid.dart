@@ -14,6 +14,7 @@ class EventStatsGrid extends StatefulWidget {
 
   final List<TeamStat> teams;
   final List<TeamStat> eventTeams;
+  final Set<int> selectedTeams;
   final bool showScoutingAnalysis;
   final String sortKey;
   final bool ascending;
@@ -24,6 +25,7 @@ class EventStatsGrid extends StatefulWidget {
     super.key,
     required this.teams,
     required this.eventTeams,
+    this.selectedTeams = const {},
     required this.showScoutingAnalysis,
     required this.sortKey,
     required this.ascending,
@@ -56,7 +58,8 @@ class _EventStatsGridState extends State<EventStatsGrid> {
   }
 
   void _updateSource() {
-    _source.update(widget.teams, widget.eventTeams, _metrics);
+    _source.update(
+        widget.teams, widget.eventTeams, _metrics, widget.selectedTeams);
   }
 
   @override
@@ -259,14 +262,16 @@ class _Metric {
 class _EventStatsSource extends DataGridSource {
   List<DataGridRow> _rows = [];
   List<_Metric> _metrics = [];
+  Set<int> _selected = {};
   final Map<String, (double, double)> _ranges = {};
 
   @override
   List<DataGridRow> get rows => _rows;
 
-  void update(
-      List<TeamStat> teams, List<TeamStat> eventTeams, List<_Metric> metrics) {
+  void update(List<TeamStat> teams, List<TeamStat> eventTeams,
+      List<_Metric> metrics, Set<int> selected) {
     _metrics = metrics;
+    _selected = Set.of(selected);
     _ranges.clear();
     for (final metric in metrics.where((metric) => metric.key != 'team')) {
       final values = eventTeams
@@ -294,7 +299,10 @@ class _EventStatsSource extends DataGridSource {
   }
 
   Color _color(_Metric metric, num? value) {
-    if (metric.key == 'team') return EventStatsGrid.headerColor;
+    if (metric.key == 'team')
+      return _selected.contains(value)
+          ? const Color(0xFF24594F)
+          : EventStatsGrid.headerColor;
     if (value == null || !value.isFinite) return EventStatsGrid.surfaceColor;
     final range = _ranges[metric.key];
     if (range == null || range.$1 == range.$2) return const Color(0xFF3D464C);
@@ -327,6 +335,7 @@ class _EventStatsSource extends DataGridSource {
                 : value.toStringAsFixed(1);
     return Semantics(
       label: 'Team $team, ${metric.label}: $label',
+      selected: _selected.contains(team),
       child: Container(
         key: ValueKey('stats-cell-$team-${metric.key}'),
         alignment:

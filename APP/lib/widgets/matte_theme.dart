@@ -3,17 +3,17 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const background = Color(0xFF070D18);
-  static const backgroundDeep = Color(0xFF03060D);
+  static const background = Color(0xFF0B111B);
+  static const backgroundDeep = Color(0xFF080D15);
   static const primary = Color(0xFF9BCBFF);
-  static const secondary = Color(0xFFAAC7F1);
-  static const aqua = Color(0xFF9DDDED);
-  static const text = Color(0xFFF2F6FF);
-  static const textMuted = Color(0xFFA9BBD3);
-  static const surface = Color(0xFF101F35);
-  static const surfaceRaised = Color(0xFF1A2D48);
-  static const surfaceSoft = Color(0xFF15263F);
-  static const border = Color(0xFF344F73);
+  static const secondary = Color(0xFFA4C9FF);
+  static const aqua = Color(0xFF97E8F1);
+  static const text = Color(0xFFF0F5FA);
+  static const textMuted = Color(0xFFA4B3C5);
+  static const surface = Color(0xFF121D2B);
+  static const surfaceRaised = Color(0xFF192738);
+  static const surfaceSoft = Color(0xFF162232);
+  static const border = Color(0xFF2C3C50);
   static const glassBlue = Color(0xFF609FFF);
 }
 
@@ -32,12 +32,16 @@ ThemeData buildMatteTheme() {
   );
 
   final rounded = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(24),
+    borderRadius: BorderRadius.circular(14),
     side: const BorderSide(color: AppColors.border),
   );
 
   return base.copyWith(
     colorScheme: scheme,
+    visualDensity: VisualDensity.standard,
+    materialTapTargetSize: MaterialTapTargetSize.padded,
+    tooltipTheme:
+        const TooltipThemeData(waitDuration: Duration(milliseconds: 350)),
     textTheme: base.textTheme.apply(
       bodyColor: AppColors.text,
       displayColor: AppColors.text,
@@ -340,10 +344,10 @@ class BlackGlassSurface extends StatelessWidget {
 
   const BlackGlassSurface({
     required this.child,
-    this.borderRadius = const BorderRadius.all(Radius.circular(34)),
+    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
     this.padding = EdgeInsets.zero,
-    this.blur = 6,
-    this.opacity = 0.735,
+    this.blur = 0,
+    this.opacity = 1,
     this.tint,
     this.highlighted = false,
     super.key,

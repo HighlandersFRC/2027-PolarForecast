@@ -184,7 +184,8 @@ class _TeamPageState extends State<TeamPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: bg,
-      appBar: PolarForecastAppBar(),
+      appBar: PolarForecastAppBar(
+          extraText: 'Team ${widget.team} · ${widget.eventCode.toUpperCase()}'),
       floatingActionButton: _index == 0
           ? FloatingActionButton.small(
               tooltip: 'Refresh team stats',
@@ -230,11 +231,11 @@ class _TeamPageState extends State<TeamPage> {
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.remove_red_eye),
-              label: "Match Scouting",
+              label: "Matches",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.list),
-              label: "Pit Scouting",
+              label: "Pit",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.photo_library_outlined),
@@ -242,7 +243,7 @@ class _TeamPageState extends State<TeamPage> {
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.heart_broken_rounded),
-              label: "Follow-Ups",
+              label: "Follow-ups",
             ),
           ],
         ),
@@ -335,8 +336,6 @@ class _TeamPageState extends State<TeamPage> {
               matchesPlayed: teamStats.MatchesPlayed,
             ),
             const SizedBox(height: 14),
-            _buildStatsFieldAccessCard(),
-            const SizedBox(height: 14),
             LayoutBuilder(
               builder: (context, constraints) {
                 final columns = constraints.maxWidth >= 950
@@ -394,6 +393,8 @@ class _TeamPageState extends State<TeamPage> {
                 );
               },
             ),
+            const SizedBox(height: 14),
+            _buildStatsFieldAccessCard(),
             if (widget.username.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
               _buildScoutingAnalysis(teamStats),
@@ -717,7 +718,7 @@ class _TeamPageState extends State<TeamPage> {
                 children: [
                   _buildHeaderChip(
                     icon: Icons.emoji_events_outlined,
-                    label: 'Rank $rank',
+                    label: rank > 0 ? 'Rank $rank' : 'Unranked',
                     color: const Color(0xFFFFC857),
                   ),
                   if (matchesPlayed > 0)

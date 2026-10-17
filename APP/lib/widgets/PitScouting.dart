@@ -58,6 +58,7 @@ class _PitScoutingState extends State<PitScouting> {
   late Future<_PitScoutingPageData> _pageFuture;
 
   String _searchQuery = '';
+  String _statusFilter = 'all';
 
   @override
   void initState() {
@@ -206,6 +207,15 @@ class _PitScoutingState extends State<PitScouting> {
   List<_PitTeamStatus> _filterTeams(
     List<_PitTeamStatus> teams,
   ) {
+    teams = teams
+        .where((team) => switch (_statusFilter) {
+              'pit' => !team.pitScoutingComplete,
+              'photo' => !team.imageComplete,
+              'followup' =>
+                !team.followUpsComplete || team.pendingFollowUpCount > 0,
+              _ => true,
+            })
+        .toList();
     final rawQuery = _searchQuery.trim();
 
     if (rawQuery.isEmpty) {
@@ -353,9 +363,30 @@ class _PitScoutingState extends State<PitScouting> {
                   visibleCount: filteredTeams.length,
                   totalCount: pageData.teams.length,
                 ),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (final filter in [
+                        ('all', 'All teams'),
+                        ('pit', 'Needs pit report'),
+                        ('photo', 'Needs photo'),
+                        ('followup', 'Needs follow-up')
+                      ])
+                        Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(filter.$2),
+                              selected: _statusFilter == filter.$1,
+                              onSelected: (_) =>
+                                  setState(() => _statusFilter = filter.$1),
+                            )),
+                    ])),
                 const SizedBox(height: 12),
                 if (filteredTeams.isEmpty)
                   _buildNoSearchResults()
+                else if (MediaQuery.sizeOf(context).width < 700)
+                  ...filteredTeams.map(_buildMobileTeamCard)
                 else
                   _buildTeamTable(filteredTeams),
               ],
@@ -376,6 +407,47 @@ class _PitScoutingState extends State<PitScouting> {
     final pitComplete = total > 0 && pageData.completedPitCount >= total;
 
     final hasPendingFollowUps = pageData.needsFollowUpCount > 0;
+
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return MattePanel(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Pit scouting',
+                  style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              const Text('See what’s done. Find what needs attention.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              const SizedBox(height: 16),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final metric in [
+                  ('Pit reports', '${pageData.completedPitCount}/$total'),
+                  ('Photos', '${pageData.completedImageCount}/$total'),
+                  ('Follow-ups', '${pageData.needsFollowUpCount} open'),
+                ])
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(metric.$2,
+                            style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary)),
+                        Text(metric.$1,
+                            style: const TextStyle(
+                                fontSize: 11, color: AppColors.textMuted)),
+                      ])),
+              ]),
+              const SizedBox(height: 14),
+              ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                      value: pitProgress, minHeight: 5)),
+            ],
+          ));
+    }
 
     return MattePanel(
       padding: const EdgeInsets.all(16),
@@ -679,6 +751,67 @@ class _PitScoutingState extends State<PitScouting> {
         ],
       ),
     );
+  }
+
+  Widget _buildMobileTeamCard(_PitTeamStatus team) {
+    final needsFollowUp =
+        !team.followUpsComplete || team.pendingFollowUpCount > 0;
+    return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: MattePanel(
+          padding: const EdgeInsets.all(14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(
+                  child: Text('Team ${team.teamNumber}',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.w800))),
+              TextButton(
+                  onPressed: () => Navigator.pushNamed(context,
+                      '/event/${widget.event}/${team.teamNumber}/team'),
+                  child: const Text('Profile')),
+            ]),
+            Wrap(spacing: 12, runSpacing: 6, children: [
+              for (final status in [
+                (team.pitScoutingComplete, 'Pit report'),
+                (team.imageComplete, 'Photo'),
+                (!needsFollowUp, 'Follow-ups')
+              ])
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                      status.$1
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      size: 15,
+                      color: status.$1
+                          ? AppColors.primary
+                          : const Color(0xFFFFD28A)),
+                  const SizedBox(width: 4),
+                  Text(status.$2,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textMuted)),
+                ]),
+            ]),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              FilledButton.tonalIcon(
+                  onPressed: () => _openPitScouting(team),
+                  icon: const Icon(Icons.assignment_outlined, size: 17),
+                  label: Text(
+                      team.pitScoutingComplete ? 'Edit report' : 'Scout pit')),
+              OutlinedButton.icon(
+                  onPressed: () => _openRobotImage(team),
+                  icon: const Icon(Icons.photo_camera_outlined, size: 17),
+                  label: const Text('Photo')),
+              if (needsFollowUp)
+                OutlinedButton.icon(
+                    onPressed: () => _openFollowUp(team),
+                    icon: const Icon(Icons.flag_outlined, size: 17),
+                    label: Text('Follow up (${team.pendingFollowUpCount})')),
+            ]),
+          ]),
+        ));
   }
 
   Widget _buildTeamTable(

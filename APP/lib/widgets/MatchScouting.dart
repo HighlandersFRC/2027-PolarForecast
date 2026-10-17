@@ -1,7 +1,17 @@
-import 'dart:math';
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:app/APIService.dart';
 import 'package:app/models/2026Matchscouting.dart';
+import 'package:app/models/auto_route.dart';
+import 'package:app/models/scouting_capture.dart';
+import 'package:app/services/scouting_local_store.dart';
+import 'package:app/services/scouting_delivery.dart';
+import 'package:app/services/scouting_json_export.dart';
+import 'package:app/widgets/live_collection_page.dart';
+import 'package:app/widgets/auto_field_map.dart';
+import 'package:app/widgets/scouting_history_sheet.dart';
+import 'package:flutter/services.dart';
 import 'package:app/models/scout_info.dart';
 import 'package:app/services/auth_service.dart';
 import 'package:app/widgets/matte_theme.dart';
@@ -28,31 +38,285 @@ enum StationMode {
 }
 
 class _MatchScoutingState extends State<MatchScouting> {
-  static const int _maxAutoFuel = 500;
+  static const int _maxAutoFuel = 300;
   static const int _maxTeleopFuel = 1000;
-  static const Set<String> _preloadLocations = {
-    'Preload Left',
-    'Preload Center',
-    'Preload Right',
-    // Kept for validation of records created before the label was corrected.
-    'Start Left',
-    'Start Center',
-    'Start Right',
-  };
-  static const Set<String> _fieldCrossings = {
-    'Went Under Left Trench',
-    'Went Over Left Bump',
-    'Went Over Right Bump',
-    'Went Under Right Trench',
-  };
   String get eventCode => widget.event;
 
   final _formKey = GlobalKey<FormState>();
+  int _activePhase = 0;
+  void _jumpToPhase(int phase) {
+    FocusScope.of(context).unfocus();
+    setState(() => _activePhase = phase);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) _scrollController.jumpTo(0);
+    });
+  }
 
   final _matchController = TextEditingController();
   final _commentsController = TextEditingController();
   final _scrollController = ScrollController();
+  final _manualTeamController = TextEditingController();
+  final _capture = ScoutingCapture();
+  final _local = ScoutingLocalStore();
+  String? _scope;
+  String _reportId = DateTime.now().microsecondsSinceEpoch.toString();
+  String _backupStatus = 'Preparing device backup…';
+  bool _restoring = false;
+  bool _loadingDraft = true;
+  bool _unconfirmed = false;
+  String? _cloudConfirmedId;
+  int _savedRevision = -1;
+  Timer? _draftTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _capture.addListener(_captureChanged);
+    for (final controller in [
+      _matchController,
+      _commentsController,
+      _manualTeamController
+    ]) {
+      controller.addListener(_scheduleBackup);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.read<AuthService>();
+    final scope = jsonEncode([eventCode, auth.groupId, auth.username]);
+    if (_scope == scope) return;
+    _scope = scope;
+    _restoreDraft(scope);
+  }
+
+  void _captureChanged() {
+    if (!mounted || _restoring) return;
+    if (_savedRevision == _capture.revision) return;
+    setState(() {
+      _autoPath = _capture.autoPath;
+      _autoFuel = _capture.fuel(CapturePhase.auto);
+      _teleopFuel = _capture.fuel(CapturePhase.teleop);
+      _defense = _capture.defense;
+      _died = _capture.disabled;
+    });
+    if (_savedRevision != _capture.revision) {
+      _savedRevision = _capture.revision;
+      _scheduleBackup();
+    }
+  }
+
+  Map<String, dynamic> get _draft => {
+        'id': _reportId,
+        'match': _matchController.text,
+        'manualTeam': _manualTeamController.text,
+        'station': _selectedMode.name,
+        'comments': _commentsController.text,
+        'red': _redTeams,
+        'blue': _blueTeams,
+        'capture': _capture.toJson(),
+        'unconfirmed': _unconfirmed,
+        'cloudConfirmed': _cloudConfirmedId == _reportId,
+      };
+
+  void _scheduleBackup() {
+    if (_restoring || _loadingDraft || _scope == null) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 200), _saveDraft);
+  }
+
+  Future<void> _saveDraft() async {
+    if (_scope == null) return;
+    try {
+      await _local.saveDraft(_scope!, _draft);
+      if (mounted) setState(() => _backupStatus = 'Draft saved on this device');
+    } catch (_) {
+      if (mounted)
+        setState(() => _backupStatus =
+            'Device backup unavailable. Export a copy before leaving.');
+    }
+  }
+
+  Future<void> _restoreDraft(String scope) async {
+    try {
+      final draft = await _local.readDraft(scope);
+      if (!mounted || _scope != scope) return;
+      if (draft != null) {
+        final id = draft['id'] as String;
+        final mode = StationMode.values.byName(draft['station'] as String);
+        final match = draft['match'] as String;
+        final manual = draft['manualTeam'] as String? ?? '';
+        final comments = draft['comments'] as String;
+        final red = List<String>.from(draft['red'] as List);
+        final blue = List<String>.from(draft['blue'] as List);
+        _restoring = true;
+        _capture.restore(Map<String, dynamic>.from(draft['capture'] as Map));
+        _reportId = id;
+        _selectedMode = mode;
+        _matchController.text = match;
+        _manualTeamController.text = manual;
+        _commentsController.text = comments;
+        _redTeams = red;
+        _blueTeams = blue;
+        _unconfirmed = draft['unconfirmed'] == true;
+        _cloudConfirmedId = draft['cloudConfirmed'] == true ? id : null;
+      }
+      _backupStatus = draft == null
+          ? 'Device backup ready'
+          : 'Restored draft from this device';
+    } catch (_) {
+      _backupStatus =
+          'Could not restore device backup. Saved reports are available in history.';
+    } finally {
+      _restoring = false;
+      if (mounted && _scope == scope) {
+        setState(() => _loadingDraft = false);
+        _captureChanged();
+      }
+    }
+  }
+
+  Future<void> _openLive() async {
+    if (!_formKey.currentState!.validate() || selectedTeam == null) {
+      _jumpToPhase(0);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Enter a match and confirm the team first.')));
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => LiveCollectionPage(
+            capture: _capture,
+            team: selectedTeam!,
+            match: _matchController.text,
+            blue: _isBlueAlliance,
+            backupStatus: () => _backupStatus)));
+    if (!mounted) return;
+    _jumpToPhase(_capture.phase == CapturePhase.review
+        ? 3
+        : _capture.phase == CapturePhase.teleop
+            ? 2
+            : 1);
+    await _saveDraft();
+  }
+
+  Future<void> _history() async {
+    if (_scope == null) return;
+    await showScoutingHistory(context, store: _local, scope: _scope!,
+        onUpload: (entry) async {
+      final api = APIService();
+      try {
+        await api
+            .submitMatchScouting(MatchScouting2026.fromJson(entry.report))
+            .timeout(const Duration(seconds: 20));
+        if (entry.id == _reportId) {
+          _cloudConfirmedId = entry.id;
+          _unconfirmed = false;
+          if (mounted) await _saveDraft();
+        }
+        if (mounted) widget.onSubmitted?.call();
+      } finally {
+        api.dispose();
+      }
+    });
+    if (!mounted) return;
+    var confirmed = _cloudConfirmedId == _reportId;
+    try {
+      confirmed = confirmed ||
+          (await _local.history(_scope!)).any((entry) =>
+              entry.id == _reportId &&
+              entry.status == LocalReportStatus.uploaded);
+    } catch (_) {
+      /* Cloud confirmation remains valid if device storage failed. */
+    }
+    if (mounted && confirmed)
+      await _advanceToNextMatch((int.tryParse(_matchController.text) ?? 0) + 1);
+  }
+
+  Future<void> _exportDraft() async {
+    try {
+      await downloadScoutingJson(
+          'polarforecast_${eventCode}_draft_$_reportId', {
+        'format': 'polarforecast.scouting-draft.v1',
+        'event': eventCode,
+        ..._draft,
+      });
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Draft JSON download started.')));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                const Text('Could not download JSON. The draft is still open.'),
+            action: SnackBarAction(
+                label: 'Copy JSON',
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(
+                      text: const JsonEncoder.withIndent('  ')
+                          .convert({'event': eventCode, ..._draft})));
+                })));
+    }
+  }
+
+  Future<void> _downloadReport(LocalScoutReport entry) async {
+    try {
+      await downloadScoutReportJson(LocalScoutReport(
+          id: entry.id,
+          report: entry.report,
+          recording: entry.recording,
+          status: LocalReportStatus.unconfirmed,
+          savedAt: entry.savedAt));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Report JSON download started.')));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'JSON download failed. Keep this draft open and try again.')));
+    }
+  }
+
+  Future<void> _advanceToNextMatch(int nextMatch) async {
+    _draftTimer?.cancel();
+    try {
+      await _local.clearDraft(_scope!);
+    } catch (_) {/* Saving the next draft can replace the previous one. */}
+    if (!mounted) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _resetForm(nextMatch));
+    await _saveDraft();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) _scrollController.jumpTo(0);
+    });
+    if (mounted) unawaited(_loadTeams());
+  }
+
+  Future<void> _clearCurrentDraft() async {
+    final clear = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('Clear the current draft?'),
+              content: const Text(
+                  'This clears unsaved observations so you can correct the match or team. Reports already saved in device history stay there.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Keep draft')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Clear draft'))
+              ],
+            ));
+    if (clear != true || !mounted) return;
+    setState(() => _resetForm(int.tryParse(_matchController.text) ?? 1));
+    await _saveDraft();
+    await _loadTeams();
+  }
+
   int _teamsRequestId = 0;
+  Timer? _teamLookupTimer;
 
   bool _loadingTeams = false;
   bool _submitting = false;
@@ -74,13 +338,15 @@ class _MatchScoutingState extends State<MatchScouting> {
   // Every field button tap adds a string to this list.
   List<String> _autoPath = [];
 
-  // Coordinate system for the field overlay.
-  // Use x from 0..1000 and y from 0..500 when placing buttons.
-  static const double _fieldWidthUnits = 1000;
-  static const double _fieldHeightUnits = 500;
-
   @override
   void dispose() {
+    _draftTimer?.cancel();
+    if (!_loadingDraft && _scope != null)
+      _local.saveDraft(_scope!, _draft).catchError((Object _) {});
+    _capture.removeListener(_captureChanged);
+    _capture.dispose();
+    _manualTeamController.dispose();
+    _teamLookupTimer?.cancel();
     _matchController.dispose();
     _commentsController.dispose();
     _scrollController.dispose();
@@ -103,21 +369,6 @@ class _MatchScoutingState extends State<MatchScouting> {
     return Colors.purple;
   }
 
-  Color get _hintColor => _primaryColor.withOpacity(0.15);
-
-  String? get _fieldImagePath {
-    if (_isRedAlliance) {
-      return "assets/2026FRCFeildImageFull.png";
-    }
-
-    if (_isBlueAlliance) {
-      return "assets/2026FRCFeildImageBlue.png";
-    }
-
-    // Do not show a field while Random is selected.
-    return null;
-  }
-
   Color _chipColor(StationMode mode, bool selected) {
     if (!selected) return AppColors.surfaceSoft;
 
@@ -137,7 +388,22 @@ class _MatchScoutingState extends State<MatchScouting> {
   // TEAM LOADING
   // --------------------------
 
+  void _scheduleTeamLookup() {
+    _teamLookupTimer?.cancel();
+    ++_teamsRequestId;
+    final match = int.tryParse(_matchController.text.trim());
+    setState(() {
+      _redTeams.clear();
+      _blueTeams.clear();
+      _loadingTeams = match != null && match > 0;
+    });
+    if (_loadingTeams) {
+      _teamLookupTimer = Timer(const Duration(milliseconds: 300), _loadTeams);
+    }
+  }
+
   Future<void> _loadTeams() async {
+    _teamLookupTimer?.cancel();
     final requestId = ++_teamsRequestId;
     final match = int.tryParse(_matchController.text.trim());
 
@@ -149,23 +415,27 @@ class _MatchScoutingState extends State<MatchScouting> {
 
     if (!_loadingTeams) return;
 
+    final api = APIService();
     try {
-      final api = APIService();
-
-      final red = await api.fetchTeamsPerAllianceRed(eventCode, match!);
-      final blue = await api.fetchTeamsPerAllianceBlue(eventCode, match);
+      final alliances = await Future.wait([
+        api.fetchTeamsPerAllianceRed(eventCode, match!),
+        api.fetchTeamsPerAllianceBlue(eventCode, match),
+      ]).timeout(const Duration(seconds: 15));
 
       if (!mounted || requestId != _teamsRequestId) return;
 
       setState(() {
-        _redTeams = List<String>.from(red);
-        _blueTeams = List<String>.from(blue);
+        _redTeams = List<String>.from(alliances[0]);
+        _blueTeams = List<String>.from(alliances[1]);
         _loadingTeams = false;
       });
+      _scheduleBackup();
     } catch (e) {
       if (!mounted || requestId != _teamsRequestId) return;
       setState(() => _loadingTeams = false);
       debugPrint(e.toString());
+    } finally {
+      api.dispose();
     }
   }
 
@@ -174,6 +444,8 @@ class _MatchScoutingState extends State<MatchScouting> {
   // --------------------------
 
   int? get selectedTeam {
+    final manual = int.tryParse(_manualTeamController.text.trim());
+    if (manual != null && manual > 0) return manual;
     List<String> source;
 
     switch (_selectedMode) {
@@ -211,6 +483,14 @@ class _MatchScoutingState extends State<MatchScouting> {
   // --------------------------
 
   void _resetForm(int nextMatch) {
+    _teamLookupTimer?.cancel();
+    ++_teamsRequestId;
+    _reportId = DateTime.now().microsecondsSinceEpoch.toString();
+    _unconfirmed = false;
+    _cloudConfirmedId = null;
+    _capture.reset();
+    _manualTeamController.clear();
+    _activePhase = 0;
     _matchController.text = nextMatch.toString();
     _commentsController.clear();
 
@@ -230,14 +510,18 @@ class _MatchScoutingState extends State<MatchScouting> {
   // --------------------------
 
   Future<void> _submit() async {
-    if (_submitting || _loadingTeams) return;
-    if (!_formKey.currentState!.validate()) return;
+    if (_submitting || _loadingDraft) return;
+    if (!_formKey.currentState!.validate()) {
+      _jumpToPhase(0);
+      return;
+    }
 
     final match = int.parse(_matchController.text.trim());
     final team = selectedTeam;
 
     final autoError = _validateAutoPath();
     if (autoError != null) {
+      _jumpToPhase(1);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(autoError)),
       );
@@ -254,6 +538,7 @@ class _MatchScoutingState extends State<MatchScouting> {
     }
 
     if (team == null) {
+      _jumpToPhase(0);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select a valid station")),
       );
@@ -263,8 +548,24 @@ class _MatchScoutingState extends State<MatchScouting> {
     setState(() => _submitting = true);
 
     try {
+      LocalScoutReport? previous;
+      try {
+        previous = (await _local.history(_scope!))
+            .where((entry) => entry.id == _reportId)
+            .firstOrNull;
+      } catch (_) {/* Device storage must not block the cloud attempt. */}
+      if (!mounted) return;
+      final alreadyUploaded = _cloudConfirmedId == _reportId ||
+          previous?.status == LocalReportStatus.uploaded;
+      final needsCheck = _unconfirmed ||
+          previous?.status == LocalReportStatus.uploading ||
+          previous?.status == LocalReportStatus.unconfirmed;
+      if (!alreadyUploaded && needsCheck) {
+        final retry = await confirmScoutingRetry(context);
+        if (retry != true || !mounted) return;
+      }
+      _capture.finish();
       final auth = context.read<AuthService>();
-      final api = APIService();
 
       final report = MatchScouting2026(
         groupId: auth.groupId,
@@ -293,35 +594,52 @@ class _MatchScoutingState extends State<MatchScouting> {
         ),
       );
 
-      await api.submitMatchScouting(report);
-
+      final entry = LocalScoutReport(
+          id: _reportId,
+          report: report.toJson(),
+          recording: _capture.toJson(),
+          status: alreadyUploaded
+              ? LocalReportStatus.uploaded
+              : LocalReportStatus.saved,
+          savedAt: DateTime.now());
+      _unconfirmed = !alreadyUploaded;
+      await _saveDraft();
+      final api = APIService();
+      late final ScoutingDeliveryResult result;
+      try {
+        result = await ScoutingDelivery(
+                store: _local,
+                upload: (payload) => api
+                    .submitMatchScouting(MatchScouting2026.fromJson(payload)),
+                downloadJson: downloadScoutReportJson)
+            .submit(_scope!, entry);
+      } finally {
+        api.dispose();
+      }
       if (!mounted) return;
-
-      widget.onSubmitted?.call();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _autoPath.isEmpty
-                ? "Submitted successfully"
-                : "Submitted successfully • Auto path: ${_autoPath.join(" -> ")}",
-          ),
-        ),
-      );
-
-      FocusScope.of(context).unfocus();
-      setState(() => _resetForm(match + 1));
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _scrollController.hasClients) {
-          _scrollController.jumpTo(0);
-        }
-      });
-      await _loadTeams();
+      _unconfirmed = !result.uploaded;
+      if (result.uploaded) {
+        _cloudConfirmedId = _reportId;
+        widget.onSubmitted?.call();
+      }
+      await _saveDraft();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result.message),
+          duration: const Duration(seconds: 8),
+          action: !result.completed
+              ? SnackBarAction(
+                  label: 'Download JSON',
+                  onPressed: () => _downloadReport(entry))
+              : null));
+      if (result.completed) await _advanceToNextMatch(match + 1);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Submission failed: $e")),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Could not complete submission: $e. Your draft remains open.'),
+          action:
+              SnackBarAction(label: 'Download JSON', onPressed: _exportDraft)));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -467,858 +785,52 @@ class _MatchScoutingState extends State<MatchScouting> {
     );
   }
 
-  bool get _hasPreloadLocation =>
-      _autoPath.isNotEmpty && _preloadLocations.contains(_autoPath.first);
+  String? _validateAutoPath() => _autoPath.isEmpty && _autoFuel > 0
+      ? 'Choose where the robot shoots its preload.'
+      : AutoRoute.validate(_autoPath);
 
-  String? get _lastMovementAction {
-    for (final action in _autoPath.reversed) {
-      if (action != 'Shot at Hub') return action;
-    }
-    return null;
-  }
-
-  bool _canAddAutoAction(String action) {
-    if (_preloadLocations.contains(action)) return _autoPath.isEmpty;
-    if (!_hasPreloadLocation) return false;
-    if (action == 'Shot at Hub') return true;
-
-    final last = _lastMovementAction;
-    if (action == 'Intaked at Neutral Zone') {
-      return last != null && _fieldCrossings.contains(last);
-    }
-    if (action == 'Intaked At Depot' && last == 'Intaked at Neutral Zone') {
-      return false;
-    }
-    return last != action;
-  }
-
-  String? _validateAutoPath() {
-    if (_autoPath.isEmpty) {
-      return _autoFuel > 0
-          ? 'Choose where the robot shoots its preload.'
-          : null;
-    }
-    if (!_preloadLocations.contains(_autoPath.first)) {
-      return 'Choose a preload location before recording auto actions.';
-    }
-
-    String? lastMovement = _autoPath.first;
-    for (final action in _autoPath.skip(1)) {
-      if (_preloadLocations.contains(action)) {
-        return 'Only one preload location is allowed.';
-      }
-      if (action == 'Intaked at Neutral Zone' &&
-          !_fieldCrossings.contains(lastMovement)) {
-        return 'Select a trench or bump before entering the neutral zone.';
-      }
-      if (action != 'Shot at Hub') lastMovement = action;
-    }
-    return null;
-  }
-
-  Widget _buildSectionCard({
-    required Widget child,
-    EdgeInsets padding = const EdgeInsets.all(14),
-  }) {
-    return MattePanel(
-      padding: padding,
-      borderRadius: BorderRadius.circular(16),
-      tint: _primaryColor,
-      child: child,
-    );
-  }
-
-  // --------------------------
-  // FIELD BUTTON BUILDER
-  // --------------------------
-  //
-  // Use this function to add your own buttons.
-  // Example:
-  //
-  // _buildFieldButton(
-  //   x: 220,
-  //   y: 170,
-  //   fieldPixelWidth: width,
-  //   fieldPixelHeight: height,
-  //   value: "Left Note",
-  //   label: "L",
-  // )
-  //
-  Widget _buildFieldButton({
-    required double x,
-    required double y,
-    required double fieldPixelWidth,
-    required double fieldPixelHeight,
-    required String value,
-    String? label,
-    IconData icon = Icons.add,
-    double size = 44,
-  }) {
-    final enabled = _canAddAutoAction(value);
-    final px = (x / _fieldWidthUnits) * fieldPixelWidth;
-    final py = (y / _fieldHeightUnits) * fieldPixelHeight;
-
-    final left =
-        (px - size / 2).clamp(0.0, max(0.0, fieldPixelWidth - size)).toDouble();
-
-    final top = (py - size / 2)
-        .clamp(0.0, max(0.0, fieldPixelHeight - size))
-        .toDouble();
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: Tooltip(
-        message: enabled
-            ? value
-            : (_hasPreloadLocation
-                ? 'That move is not possible from the current location'
-                : 'Choose a preload location first'),
-        child: Material(
-          color: enabled
-              ? _primaryColor.withOpacity(0.95)
-              : Colors.blueGrey.withValues(alpha: 0.62),
-          shape: const CircleBorder(),
-          elevation: 5,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: enabled
-                ? () {
-                    setState(() {
-                      _autoPath.add(value);
-                    });
-                  }
-                : null,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white,
-                  width: 2,
-                ),
-              ),
-
-              // The entire field is rotated 90° counterclockwise.
-              // Rotate the content clockwise so the label stays upright.
-              child: RotatedBox(
-                quarterTurns: 1,
-                child: Center(
-                  child: label != null
-                      ? FittedBox(
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Text(
-                              label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        )
-                      : Icon(
-                          icon,
-                          color: Colors.white,
-                          size: size * 0.5,
-                        ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _buildSharedFieldButtons({
-    required double width,
-    required double height,
-  }) {
-    // The coordinate system is 1000 × 500.
-    // Buttons scale with the rendered field width.
-    final double buttonSize = (width * 0.08).clamp(48.0, 96.0).toDouble();
-
-    return [
-      _buildFieldButton(
-        x: 90,
-        y: 105,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Left',
-        label: 'Preload L',
-        icon: Icons.adjust_rounded,
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 90,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Center',
-        label: 'Preload C',
-        icon: Icons.adjust_rounded,
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 90,
-        y: 395,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: 'Preload Right',
-        label: 'Preload R',
-        icon: Icons.adjust_rounded,
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 260,
-        y: 130,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Intaked At Depot",
-        label: "Depot",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 40,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Went Under Left Trench",
-        label: "Left Trench",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 150,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Went Over Left Bump",
-        label: "Left Bump",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 350,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Went Over Right Bump",
-        label: "Right Bump",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 500,
-        y: 500,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Went Under Right Trench",
-        label: "Right Trench",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 530,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Shot at Hub",
-        label: "Hub",
-        size: buttonSize,
-      ),
-      _buildFieldButton(
-        x: 730,
-        y: 250,
-        fieldPixelWidth: width,
-        fieldPixelHeight: height,
-        value: "Intaked at Neutral Zone",
-        label: "Neutral Zone",
-        size: buttonSize,
-      ),
-    ];
-  }
-
-  Widget _buildAutoField() {
-    final fieldImage = _fieldImagePath;
-    final allianceColor =
-        _isBlueAlliance ? const Color(0xFF4C8DFF) : const Color(0xFFFF5C68);
-
-    return _buildSectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: allianceColor.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(11),
-                            border: Border.all(
-                              color: allianceColor.withValues(alpha: 0.28),
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.route_rounded,
-                            color: allianceColor,
-                            size: 21,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "Auto Path",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              SizedBox(height: 3),
-                              Text(
-                                "Choose the preload location, then tap only the route the robot actually drives.",
-                                style: TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 13,
-                                  height: 1.35,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Undo and clear controls
-              _autoFieldActionButton(
-                tooltip: "Undo last action",
-                icon: Icons.undo_rounded,
-                onPressed: _autoPath.isEmpty
-                    ? null
-                    : () {
-                        setState(() {
-                          _autoPath.removeLast();
-                        });
-                      },
-              ),
-              const SizedBox(width: 8),
-              _autoFieldActionButton(
-                tooltip: "Clear auto path",
-                icon: Icons.delete_outline_rounded,
-                foregroundColor: const Color(0xFFFF6B75),
-                onPressed: _autoPath.isEmpty
-                    ? null
-                    : () {
-                        setState(() {
-                          _autoPath.clear();
-                        });
-                      },
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 18),
-
-          // Field status bar
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 13,
-              vertical: 10,
-            ),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.055),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: fieldImage == null ? Colors.white30 : allianceColor,
-                    shape: BoxShape.circle,
-                    boxShadow: fieldImage == null
-                        ? null
-                        : [
-                            BoxShadow(
-                              color: allianceColor.withValues(alpha: 0.55),
-                              blurRadius: 8,
-                            ),
-                          ],
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    fieldImage == null
-                        ? "Waiting for a driver station"
-                        : "${_isBlueAlliance ? "Blue" : "Red"} alliance field",
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _autoPath.isEmpty
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : allianceColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: _autoPath.isEmpty
-                          ? Colors.white10
-                          : allianceColor.withValues(alpha: 0.25),
-                    ),
-                  ),
-                  child: Text(
-                    "${_autoPath.length} "
-                    "${_autoPath.length == 1 ? "action" : "actions"}",
-                    style: TextStyle(
-                      color: _autoPath.isEmpty ? Colors.white38 : allianceColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
-            child: fieldImage == null
-                ? _buildEmptyAutoField(allianceColor)
-                : LayoutBuilder(
-                    key: ValueKey(fieldImage),
-                    builder: (context, constraints) {
-                      final screenWidth = MediaQuery.sizeOf(context).width;
-                      final isPhone = screenWidth < 600;
-
-                      // Use much more of the card width instead of only one third.
-                      final displayWidth = isPhone
-                          ? constraints.maxWidth
-                          : constraints.maxWidth.clamp(340.0, 560.0);
-
-                      final displayHeight = displayWidth * 1.9;
-
-                      return Center(
-                        child: Container(
-                          width: displayWidth,
-                          height: displayHeight,
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF101216),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: allianceColor.withValues(alpha: 0.50),
-                              width: 1.4,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.35),
-                                blurRadius: 24,
-                                offset: const Offset(0, 12),
-                              ),
-                              BoxShadow(
-                                color: allianceColor.withValues(alpha: 0.12),
-                                blurRadius: 28,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: RotatedBox(
-                              quarterTurns: 3,
-                              child: LayoutBuilder(
-                                builder: (context, fieldConstraints) {
-                                  final fieldWidth = fieldConstraints.maxWidth;
-                                  final fieldHeight =
-                                      fieldConstraints.maxHeight;
-
-                                  return Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      const ColoredBox(
-                                        color: Color(0xFF090A0D),
-                                      ),
-
-                                      // Field image
-                                      RotatedBox(
-                                        quarterTurns: _isBlueAlliance ? 2 : 0,
-                                        child: Image.asset(
-                                          fieldImage,
-                                          width: fieldWidth,
-                                          height: fieldHeight,
-                                          fit: BoxFit.contain,
-                                          alignment: Alignment.center,
-                                          filterQuality: FilterQuality.high,
-                                        ),
-                                      ),
-
-                                      // Subtle contrast overlay
-                                      IgnorePointer(
-                                        child: DecoratedBox(
-                                          decoration: BoxDecoration(
-                                            gradient: LinearGradient(
-                                              begin: Alignment.topCenter,
-                                              end: Alignment.bottomCenter,
-                                              colors: [
-                                                Colors.black.withValues(
-                                                  alpha: 0.04,
-                                                ),
-                                                Colors.transparent,
-                                                Colors.black.withValues(
-                                                  alpha: 0.12,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-
-                                      // Interactive field buttons
-                                      ..._buildSharedFieldButtons(
-                                        width: fieldWidth,
-                                        height: fieldHeight,
-                                      ),
-
-                                      // Inner field border
-                                      IgnorePointer(
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                            border: Border.all(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.14,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-
-          const SizedBox(height: 18),
-          _buildAutoPathPreview(),
+  Widget _buildAutoField({bool showMap = false}) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (showMap) ...[
+          AutoFieldMap(
+              path: _autoPath,
+              blue: _isBlueAlliance,
+              enabled: false,
+              keyPrefix: 'preview'),
+          const SizedBox(height: 12),
         ],
-      ),
-    );
-  }
+        FilledButton.icon(
+            onPressed: _submitting ? null : _openLive,
+            icon: const Icon(Icons.play_circle_outline_rounded),
+            label: Text(_capture.started
+                ? 'Open live recorder'
+                : 'Open field recorder'),
+            style:
+                FilledButton.styleFrom(minimumSize: const Size.fromHeight(60))),
+        const SizedBox(height: 12),
+        Text(
+            _autoPath.isEmpty
+                ? 'Record crossings, intakes, and shooting bursts as they happen.'
+                : _autoPath.map(AutoRoute.label).join(' → '),
+            style: const TextStyle(color: AppColors.textMuted, height: 1.5)),
+        TextButton.icon(
+            onPressed: () => showCaptureTimeline(context, _capture),
+            icon: const Icon(Icons.history_rounded),
+            label: Text(
+                '${_capture.actions.length} observations · timeline & undo')),
+      ]);
 
-  Widget _autoFieldActionButton({
-    required String tooltip,
-    required IconData icon,
-    required VoidCallback? onPressed,
-    Color foregroundColor = Colors.white70,
-  }) {
-    final enabled = onPressed != null;
-
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: enabled
-            ? Colors.white.withValues(alpha: 0.06)
-            : Colors.white.withValues(alpha: 0.025),
-        borderRadius: BorderRadius.circular(11),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(11),
-          child: Container(
-            width: 48,
-            height: 48,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(11),
-              border: Border.all(
-                color: enabled ? Colors.white12 : Colors.white10,
-              ),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: enabled ? foregroundColor : Colors.white24,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyAutoField(Color allianceColor) {
-    return Container(
-      key: const ValueKey("empty-auto-field"),
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 230),
-      decoration: BoxDecoration(
-        color: const Color(0xFF17191E),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -35,
-            top: -35,
-            child: Container(
-              width: 150,
-              height: 150,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: allianceColor.withValues(alpha: 0.05),
-              ),
-            ),
-          ),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 34,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 62,
-                    height: 62,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.055),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: Colors.white10),
-                    ),
-                    child: const Icon(
-                      Icons.stadium_outlined,
-                      color: Colors.white54,
-                      size: 30,
-                    ),
-                  ),
-                  const SizedBox(height: 17),
-                  const Text(
-                    "Choose a driver station",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  const Text(
-                    "Select a red or blue starting station to load the interactive field.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white38,
-                      fontSize: 13,
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAutoPathPreview() {
-    if (_autoPath.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 20,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFF232323),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: const Column(
-          children: [
-            Icon(
-              Icons.route_outlined,
-              color: Colors.white38,
-              size: 32,
-            ),
-            SizedBox(height: 8),
-            Text(
-              "No auto actions selected yet.",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
+  Widget _buildSectionCard({required Widget child}) => MattePanel(
+        padding: const EdgeInsets.all(14),
+        borderRadius: BorderRadius.circular(16),
+        child: child,
       );
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF232323),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _hintColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  "Auto Actions (${_autoPath.length})",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _autoPath.clear();
-                  });
-                },
-                icon: const Icon(
-                  Icons.delete_sweep_outlined,
-                  size: 18,
-                ),
-                label: const Text("Clear"),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.redAccent,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Each action fills the width of the card.
-          ...List.generate(_autoPath.length, (index) {
-            final item = _autoPath[index];
-            final isLast = index == _autoPath.length - 1;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: isLast ? 0 : 10,
-              ),
-              child: Container(
-                width: double.infinity,
-                constraints: const BoxConstraints(
-                  minHeight: 64,
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2C2C2C),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _primaryColor.withOpacity(0.35),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: _primaryColor,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        "${index + 1}",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        item,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: "Remove step",
-                      onPressed: () {
-                        setState(() {
-                          if (index == 0 && _preloadLocations.contains(item)) {
-                            _autoPath.clear();
-                          } else {
-                            _autoPath.removeAt(index);
-                          }
-                        });
-                      },
-                      icon: const Icon(
-                        Icons.close,
-                        color: Colors.white60,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
 
   Widget _buildSelectedTeamCard() {
     final team = selectedTeam;
 
     return _buildSectionCard(
-      child: _loadingTeams
+      child: _loadingTeams && selectedTeam == null
           ? const Center(child: CircularProgressIndicator())
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1518,313 +1030,354 @@ class _MatchScoutingState extends State<MatchScouting> {
     );
   }
 
+  Widget _fuelCounter(bool auto) {
+    final maximum = auto ? _maxAutoFuel : _maxTeleopFuel;
+    void count(int delta) {
+      HapticFeedback.selectionClick();
+      _capture.correctFuel(
+          auto ? CapturePhase.auto : CapturePhase.teleop, delta);
+    }
+
+    return buildCounterCard(
+      title: auto ? 'Auto fuel' : 'Teleop fuel',
+      value: auto ? _autoFuel : _teleopFuel,
+      accentColor: auto ? const Color(0xFFFFD28A) : AppColors.secondary,
+      maximum: maximum,
+      periodLabel: auto ? 'AUTO' : 'TELEOP',
+      onAdd: () => count(1),
+      onRemove: () => count(-1),
+      onAddFive: () => count(5),
+      onRemoveFive: () => count(-5),
+    );
+  }
+
+  Future<void> _selectStation(StationMode mode) async {
+    if (mode == _selectedMode) return;
+    if (_autoPath.isNotEmpty ||
+        _capture.phase != CapturePhase.setup ||
+        _autoFuel > 0 ||
+        _teleopFuel > 0 ||
+        _commentsController.text.isNotEmpty ||
+        _died ||
+        _defense) {
+      final clear = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('Switch robots?'),
+                content: const Text(
+                    'Clear this draft before scouting a different station so the two robots’ data stays separate.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Keep scouting')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Clear and switch'))
+                ],
+              ));
+      if (clear != true || !mounted) return;
+    }
+    setState(() {
+      _selectedMode = mode;
+      _capture.reset();
+      _reportId = DateTime.now().microsecondsSinceEpoch.toString();
+      _unconfirmed = false;
+      _cloudConfirmedId = null;
+      _manualTeamController.clear();
+      _autoPath = [];
+      _autoFuel = 0;
+      _teleopFuel = 0;
+      _commentsController.clear();
+      _died = false;
+      _defense = false;
+    });
+    _scheduleBackup();
+  }
+
+  Widget _preMatch() => _buildScoutingSection(
+        title: 'Confirm your robot',
+        description: 'Check the match and station before the robot moves.',
+        icon: Icons.assignment_outlined,
+        accentColor: AppColors.secondary,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TextFormField(
+              controller: _matchController,
+              enabled: !_submitting &&
+                  _capture.phase == CapturePhase.setup &&
+                  _capture.actions.isEmpty,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                  labelText: 'Match number',
+                  prefixIcon: Icon(Icons.sports_score_rounded)),
+              onChanged: (_) => _scheduleTeamLookup(),
+              validator: (value) => (int.tryParse(value?.trim() ?? '') ?? 0) < 1
+                  ? 'Enter a valid match number'
+                  : null),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+              builder: (context, constraints) =>
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    for (var i = 0; i < StationMode.values.length; i++)
+                      SizedBox(
+                          width: (constraints.maxWidth - 16) / 3,
+                          child: ChoiceChip(
+                            selected: _selectedMode == StationMode.values[i],
+                            selectedColor:
+                                _chipColor(StationMode.values[i], true)
+                                    .withValues(alpha: 0.32),
+                            showCheckmark: false,
+                            label: Column(children: [
+                              Text('${i < 3 ? 'Red' : 'Blue'} ${i % 3 + 1}',
+                                  style: const TextStyle(fontSize: 12)),
+                              const SizedBox(height: 4),
+                              Text(
+                                  _teamLabel(i < 3 ? _redTeams : _blueTeams,
+                                          i % 3) ??
+                                      '—',
+                                  style: const TextStyle(
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w800))
+                            ]),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 10, horizontal: 4),
+                            onSelected: _submitting
+                                ? null
+                                : (_) => _selectStation(StationMode.values[i]),
+                          )),
+                  ])),
+          const SizedBox(height: 12),
+          TextFormField(
+              controller: _manualTeamController,
+              enabled: !_submitting &&
+                  _capture.phase == CapturePhase.setup &&
+                  _capture.actions.isEmpty,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                  labelText: 'Team override (optional)',
+                  helperText:
+                      'Use when the schedule is unavailable. Check the bumper number.',
+                  helperMaxLines: 2,
+                  prefixIcon: Icon(Icons.numbers_rounded)),
+              onChanged: (_) => setState(() {}),
+              validator: (value) => value != null &&
+                      value.isNotEmpty &&
+                      (int.tryParse(value) ?? 0) < 1
+                  ? 'Enter a valid team number'
+                  : null),
+          const SizedBox(height: 12),
+          _buildSelectedTeamCard(),
+          const SizedBox(height: 12),
+          _buildAutoField(),
+          if (_loadingTeams)
+            const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: LinearProgressIndicator()),
+        ]),
+      );
+
+  Widget _review() => _buildScoutingSection(
+        title: 'Review the match',
+        description: 'Finish observations, then submit once.',
+        icon: Icons.fact_check_outlined,
+        accentColor: AppColors.primary,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            Chip(label: Text('Auto fuel $_autoFuel')),
+            Chip(label: Text('Teleop fuel $_teleopFuel')),
+            Chip(label: Text('${_autoPath.length} auto actions')),
+          ]),
+          const SizedBox(height: 12),
+          _buildScoutingToggle(
+              title: 'Robot disabled',
+              subtitle: 'Stopped functioning during the match.',
+              icon: Icons.power_settings_new_rounded,
+              value: _died,
+              activeColor: const Color(0xFFFF929E),
+              onChanged: (value) => _capture.flag(CaptureKind.disabled, value)),
+          const SizedBox(height: 10),
+          _buildScoutingToggle(
+              title: 'Played defense',
+              subtitle: 'Actively defended another robot.',
+              icon: Icons.shield_outlined,
+              value: _defense,
+              activeColor: const Color(0xFFFFD28A),
+              onChanged: (value) => _capture.flag(CaptureKind.defense, value)),
+          const SizedBox(height: 16),
+          TextFormField(
+              controller: _commentsController,
+              minLines: 3,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                  labelText: 'Comments',
+                  hintText: 'Driver skill, breakdowns, defense, or strategy…',
+                  alignLabelWithHint: true)),
+          const SizedBox(height: 12),
+          TextButton.icon(
+              onPressed: () => showCaptureTimeline(context, _capture),
+              icon: const Icon(Icons.history_rounded),
+              label: const Text('Review observation timeline')),
+          const Text(
+              'Submit uploads to the cloud. If the upload is not confirmed, a JSON backup downloads automatically.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        ]),
+      );
+
   @override
   Widget build(BuildContext context) {
-    InputDecoration input(String label) => InputDecoration(
-          labelText: label,
-          filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.07),
-          labelStyle: const TextStyle(color: AppColors.textMuted),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(15),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(15),
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(15),
-            borderSide: BorderSide(color: _primaryColor),
-          ),
-        );
-
+    const phases = ['Pre-match', 'Auto', 'Teleop', 'Review'];
+    if (_loadingDraft) return const Center(child: CircularProgressIndicator());
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: SingleChildScrollView(
-        controller: _scrollController,
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 14),
-              const SizedBox(height: 14),
-
-// PRE-MATCH
-              _buildScoutingSection(
-                title: "Pre-Match",
-                description: "Confirm the selected team and match information.",
-                icon: Icons.assignment_outlined,
-                accentColor: const Color(0xFF8B9DFF),
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _matchController,
-                      enabled: !_submitting,
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: input("Match Number"),
-                      onChanged: (_) => _loadTeams(),
-                      validator: (value) {
-                        final match = int.tryParse(value?.trim() ?? '');
-                        return match == null || match < 1
-                            ? "Enter a valid match number"
-                            : null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: StationMode.values.map((mode) {
-                        final selected = _selectedMode == mode;
-
-                        String label;
-                        switch (mode) {
-                          case StationMode.red1:
-                            label = "Red 1";
-                            final team = _teamLabel(_redTeams, 0);
-                            if (team != null) label += " • $team";
-                            break;
-                          case StationMode.red2:
-                            label = "Red 2";
-                            final team = _teamLabel(_redTeams, 1);
-                            if (team != null) label += " • $team";
-                            break;
-                          case StationMode.red3:
-                            label = "Red 3";
-                            final team = _teamLabel(_redTeams, 2);
-                            if (team != null) label += " • $team";
-                            break;
-                          case StationMode.blue1:
-                            label = "Blue 1";
-                            final team = _teamLabel(_blueTeams, 0);
-                            if (team != null) label += " • $team";
-                            break;
-                          case StationMode.blue2:
-                            label = "Blue 2";
-                            final team = _teamLabel(_blueTeams, 1);
-                            if (team != null) label += " • $team";
-                            break;
-                          case StationMode.blue3:
-                            label = "Blue 3";
-                            final team = _teamLabel(_blueTeams, 2);
-                            if (team != null) label += " • $team";
-                            break;
-                        }
-
-                        return ChoiceChip(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          label: Text(
-                            label,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          selected: selected,
-                          selectedColor: _chipColor(mode, true),
-                          backgroundColor:
-                              Colors.white.withValues(alpha: 0.055),
-                          side: BorderSide(
-                            color: selected
-                                ? _chipColor(mode, true).withValues(alpha: 0.70)
-                                : AppColors.border,
-                          ),
-                          onSelected: _submitting
-                              ? null
-                              : (_) {
-                                  setState(() {
-                                    _selectedMode = mode;
-                                  });
-                                },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(
-                      height: 10,
-                    ),
-                    _buildSelectedTeamCard()
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-// AUTO
-              _buildScoutingSection(
-                title: "Autonomous",
-                description:
-                    "Record the robot's autonomous path and fuel scored.",
-                icon: Icons.route_rounded,
-                accentColor: const Color(0xFFFFB74D),
-                child: Column(
-                  children: [
-                    _buildAutoField(),
-                    const SizedBox(height: 14),
-                    buildCounterCard(
-                      title: "Auto Fuel",
-                      value: _autoFuel,
-                      accentColor: const Color(0xFFFFB74D),
-                      maximum: _maxAutoFuel,
-                      periodLabel: 'AUTO',
-                      onAdd: () {
-                        setState(() {
-                          _autoFuel = (_autoFuel + 1).clamp(0, _maxAutoFuel);
-                        });
-                      },
-                      onRemove: () {
-                        setState(() {
-                          _autoFuel = (_autoFuel - 1).clamp(0, _maxAutoFuel);
-                        });
-                      },
-                      onAddFive: () {
-                        setState(() {
-                          _autoFuel = (_autoFuel + 5).clamp(0, _maxAutoFuel);
-                        });
-                      },
-                      onRemoveFive: () {
-                        setState(() {
-                          _autoFuel = (_autoFuel - 5).clamp(0, _maxAutoFuel);
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-// TELEOP
-              _buildScoutingSection(
-                title: "Teleop",
-                description:
-                    "Track scoring during the driver-controlled period.",
-                icon: Icons.sports_esports_rounded,
-                accentColor: const Color(0xFF4C8DFF),
-                child: buildCounterCard(
-                  title: "Teleop Fuel",
-                  value: _teleopFuel,
-                  accentColor: const Color(0xFF4C8DFF),
-                  maximum: _maxTeleopFuel,
-                  periodLabel: 'TELEOP',
-                  onAdd: () {
-                    setState(() {
-                      _teleopFuel = (_teleopFuel + 1).clamp(0, _maxTeleopFuel);
-                    });
+      body: Column(children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.92),
+              border: Border(
+                  bottom:
+                      BorderSide(color: _primaryColor.withValues(alpha: 0.4)))),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(Icons.visibility_outlined, size: 20, color: _primaryColor),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(
+                      selectedTeam == null
+                          ? 'Match scouting'
+                          : 'Team $selectedTeam · Match ${_matchController.text}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 16))),
+              Text('${_autoFuel + _teleopFuel} fuel',
+                  style: const TextStyle(
+                      color: AppColors.primary, fontWeight: FontWeight.w800)),
+              PopupMenuButton<String>(
+                  enabled: !_submitting,
+                  tooltip: 'Device backups',
+                  onSelected: (value) {
+                    if (value == 'history') _history();
+                    if (value == 'export') _exportDraft();
+                    if (value == 'clear') _clearCurrentDraft();
                   },
-                  onRemove: () {
-                    setState(() {
-                      _teleopFuel = (_teleopFuel - 1).clamp(0, _maxTeleopFuel);
-                    });
-                  },
-                  onAddFive: () {
-                    setState(() {
-                      _teleopFuel = (_teleopFuel + 5).clamp(0, _maxTeleopFuel);
-                    });
-                  },
-                  onRemoveFive: () {
-                    setState(() {
-                      _teleopFuel = (_teleopFuel - 5).clamp(0, _maxTeleopFuel);
-                    });
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-// MISC
-              _buildScoutingSection(
-                title: "Miscellaneous",
-                description:
-                    "Record reliability, defense, and additional observations.",
-                icon: Icons.fact_check_outlined,
-                accentColor: const Color(0xFF9B7BFF),
-                child: Column(
-                  children: [
-                    _buildScoutingToggle(
-                      title: "Robot Died",
-                      subtitle:
-                          "The robot became disabled or stopped functioning.",
-                      icon: Icons.power_settings_new_rounded,
-                      value: _died,
-                      activeColor: const Color(0xFFFF5C68),
-                      onChanged: (value) {
-                        setState(() => _died = value);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _buildScoutingToggle(
-                      title: "Played Defense",
-                      subtitle: "The robot actively defended another robot.",
-                      icon: Icons.shield_outlined,
-                      value: _defense,
-                      activeColor: const Color(0xFFFFB74D),
-                      onChanged: (value) {
-                        setState(() => _defense = value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _commentsController,
-                      maxLines: 4,
-                      minLines: 4,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: input("Comments").copyWith(
-                        hintText:
-                            "Driver skill, issues, strategy, observations...",
-                        alignLabelWithHint: true,
-                        prefixIcon: const Padding(
-                          padding: EdgeInsets.only(bottom: 76),
-                          child: Icon(Icons.notes_rounded),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              FilledButton.icon(
-                onPressed: _submitting || _loadingTeams ? null : _submit,
-                icon: _submitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.send_rounded),
-                label: Text(
-                  _submitting ? "Submitting..." : "Submit Scouting Data",
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _primaryColor.withValues(alpha: 0.80),
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: _primaryColor.withValues(alpha: 0.4),
-                  minimumSize: const Size.fromHeight(64),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.26),
-                    ),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-            ],
-          ),
+                  itemBuilder: (_) => const [
+                        PopupMenuItem(
+                            value: 'history',
+                            child: Text('Saved reports & upload')),
+                        PopupMenuItem(
+                            value: 'export',
+                            child: Text('Download draft JSON')),
+                        PopupMenuItem(
+                            value: 'clear', child: Text('Clear current draft')),
+                      ]),
+            ]),
+            Text(_backupStatus,
+                style:
+                    const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  for (var i = 0; i < phases.length; i++)
+                    Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text('${i + 1}  ${phases[i]}'),
+                          selected: i == _activePhase,
+                          onSelected:
+                              _submitting ? null : (_) => _jumpToPhase(i),
+                        )),
+                ])),
+          ]),
         ),
-      ),
+        Expanded(
+            child: SingleChildScrollView(
+          controller: _scrollController,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(12),
+          child: Form(
+              key: _formKey,
+              child: Column(children: [
+                Visibility(
+                    visible: _activePhase == 0,
+                    maintainState: true,
+                    child: _preMatch()),
+                Visibility(
+                    visible: _activePhase == 1,
+                    maintainState: true,
+                    child: _buildScoutingSection(
+                        title: 'Autonomous',
+                        description:
+                            'Capture the route and count the fuel you observe.',
+                        icon: Icons.route_rounded,
+                        accentColor: const Color(0xFFFFD28A),
+                        child: Column(children: [
+                          _buildAutoField(showMap: true),
+                          const SizedBox(height: 16),
+                          _fuelCounter(true)
+                        ]))),
+                Visibility(
+                    visible: _activePhase == 2,
+                    maintainState: true,
+                    child: _buildScoutingSection(
+                        title: 'Teleop',
+                        description:
+                            'Keep your eyes on the robot. Use +1 or +5 as fuel scores.',
+                        icon: Icons.sports_esports_rounded,
+                        accentColor: AppColors.secondary,
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildAutoField(),
+                              const SizedBox(height: 12),
+                              _fuelCounter(false)
+                            ]))),
+                Visibility(
+                    visible: _activePhase == 3,
+                    maintainState: true,
+                    child: _review()),
+              ])),
+        )),
+      ]),
+      bottomNavigationBar: SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            color: AppColors.surface,
+            child: Row(children: [
+              if (_activePhase > 0) ...[
+                OutlinedButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => _jumpToPhase(_activePhase - 1),
+                    child: const Icon(Icons.arrow_back_rounded)),
+                const SizedBox(width: 8)
+              ],
+              Expanded(
+                  child: FilledButton.icon(
+                onPressed: _submitting
+                    ? null
+                    : _activePhase == 3
+                        ? () => _submit()
+                        : () => _jumpToPhase(_activePhase + 1),
+                icon: Icon(
+                    _activePhase == 3
+                        ? Icons.send_rounded
+                        : Icons.arrow_forward_rounded,
+                    size: 18),
+                label: Text(_submitting
+                    ? 'Submitting…'
+                    : _activePhase == 3
+                        ? 'Upload match report'
+                        : 'Continue to ${phases[_activePhase + 1]}'),
+                style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50)),
+              )),
+            ]),
+          )),
     );
   }
 }

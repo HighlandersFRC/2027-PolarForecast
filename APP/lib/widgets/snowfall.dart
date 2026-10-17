@@ -10,14 +10,29 @@ class Snowfall extends StatefulWidget {
 }
 
 class _SnowfallState extends State<Snowfall>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _snow =
       AnimationController(vsync: this, duration: const Duration(seconds: 60));
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncMotion();
+    } else {
+      _snow.stop();
+    }
+  }
+
+  void _syncMotion() {
+    if (!mounted) return;
+    if (MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
       _snow.stop();
     } else {
       _snow.repeat();
@@ -25,13 +40,21 @@ class _SnowfallState extends State<Snowfall>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncMotion();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _snow.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Stack(children: [
+        Positioned.fill(child: widget.child),
         Positioned.fill(
           child: IgnorePointer(
             child: ExcludeSemantics(
@@ -41,7 +64,6 @@ class _SnowfallState extends State<Snowfall>
             ),
           ),
         ),
-        Positioned.fill(child: widget.child),
       ]);
 }
 
@@ -54,16 +76,16 @@ class _SnowPainter extends CustomPainter {
     final paint = Paint()
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 1;
-    for (var i = 0; i < 28; i++) {
+    for (var i = 0; i < (size.width < 650 ? 26 : 48); i++) {
       final progress = animation.value;
       final x =
           ((i * 0.618034 + math.sin(progress * math.pi * 2 + i) * 0.025) % 1) *
               size.width;
       final y =
-          ((i * 0.381966 + progress * (1 + i % 3 * 0.2)) % 1) * size.height;
-      final radius = 2.5 + i % 4;
+          ((i * 0.414214 + progress * (1 + i % 3 * 0.2)) % 1) * size.height;
+      final radius = 3.5 + i % 5;
       paint.color =
-          const Color(0xFFC8E4FF).withValues(alpha: 0.08 + i % 3 * 0.035);
+          const Color(0xFFC8E4FF).withValues(alpha: 0.10 + i % 3 * 0.035);
       canvas.save();
       canvas.translate(x, y);
       canvas.rotate(progress * math.pi * 2 + i);
