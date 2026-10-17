@@ -1,0 +1,13 @@
+.dart_tool
+.flutter-plugins
+.flutter-plugins-dependencies
+.gitignore
+build
+android
+ios
+linux
+macos
+test
+windows
+README.md
+run_frontend_locally.bat
