@@ -31,7 +31,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
-          cd /path/to/your/server/checkout
+          cd "/opt/polarforecast/2027-PolarForecast"
           test "$(git branch --show-current)" = prod
           git pull --ff-only origin prod
           docker compose up -d --build api app
