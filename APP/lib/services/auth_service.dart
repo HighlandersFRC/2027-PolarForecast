@@ -252,6 +252,31 @@ class AuthService extends ChangeNotifier {
   // ------------------------------------------------------------
   // REFRESH TOKEN
   // ------------------------------------------------------------
+  Future<String> getAccessToken() async {
+    if (isLoggedIn && _accessTokenNeedsRefresh()) {
+      await refreshTokens();
+    }
+    final token = accessToken;
+    if (!isLoggedIn || token == null || token.isEmpty) {
+      throw StateError('Sign in again to continue.');
+    }
+    return token;
+  }
+
+  bool _accessTokenNeedsRefresh() {
+    final parts = accessToken?.split('.');
+    if (parts == null || parts.length != 3) return true;
+    try {
+      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final claims = jsonDecode(payload);
+      final expires = claims is Map ? claims['exp'] : null;
+      return expires is! num ||
+          expires * 1000 <= DateTime.now().millisecondsSinceEpoch + 30000;
+    } on FormatException {
+      return true;
+    }
+  }
+
   Future<void> refreshTokens() async {
     if (refreshToken == null) return;
 

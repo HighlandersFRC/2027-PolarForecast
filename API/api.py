@@ -9,7 +9,8 @@ from uuid import uuid4
 from bson import ObjectId
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import HTTPException, Query, Response
+from fastapi import Depends, HTTPException, Query, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pymongo import MongoClient
 import requests
 from datetime import datetime, timedelta, timezone
@@ -44,6 +45,7 @@ from keycloak_client import (
 from routers.data import DataDependencies, create_data_router
 from routers.groups import GroupDependencies, create_group_router
 from routers.users import UserDependencies, create_user_router
+from routers.schedules import create_schedule_router
 from tba_client import (
     DEFAULT_TBA_HEADERS,
     get_tba_json,
@@ -3213,6 +3215,35 @@ def get_group_stats_from_db(group_id: str, event: str):
 def get_predictions_from_db(event: str):
     return collection_data(PredictionCollection, {"event_key": event})
     
+def authenticated_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+) -> str:
+    unauthenticated = HTTPException(
+        401, "Sign in again to continue.", headers={"WWW-Authenticate": "Bearer"},
+    )
+    if credentials is None:
+        raise unauthenticated
+
+    try:
+        response = requests.get(
+            f"{KEYCLOAK_BASE_URL.rstrip('/')}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+            headers={"Authorization": f"Bearer {credentials.credentials}"},
+            timeout=5,
+            allow_redirects=False,
+        )
+        if response.status_code in (401, 403):
+            raise unauthenticated
+        if response.status_code != 200:
+            raise HTTPException(502, "Could not verify your sign-in. Try again.")
+        claims = response.json()
+    except (requests.RequestException, ValueError) as error:
+        raise HTTPException(502, "Could not verify your sign-in. Try again.") from error
+    subject = claims.get("sub") if isinstance(claims, dict) else None
+    if not isinstance(subject, str) or not subject:
+        raise unauthenticated
+    return subject
+
+
 def get_user_role(group_id: str, user_id: str):
     member = GroupMembersCollection.find_one({
         "group_id": group_id,
@@ -3242,6 +3273,10 @@ def require_role(group_id: str, user_id: str, allowed_roles: list):
 def can_manage(actor_role: str, target_role: str):
     return ROLE_PRIORITY.get(actor_role, 0) > ROLE_PRIORITY.get(target_role, 0)
 
+app.include_router(create_schedule_router(
+    db["EventSchedules"], username_is_current_group_member,
+    get_user_role, authenticated_user,
+))
 
 app.include_router(create_data_router(DataDependencies(
     etags_collection=ETagsCollection,
@@ -3276,6 +3311,7 @@ app.include_router(create_group_router(GroupDependencies(
 )))
 
 app.include_router(create_user_router(UserDependencies(
+    authenticated_user=authenticated_user,
     group_members_collection=GroupMembersCollection,
     groups_collection=GroupsCollection,
     join_requests_collection=JoinRequestsCollection,

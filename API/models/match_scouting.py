@@ -3,9 +3,6 @@ from pydantic import BaseModel, Field
 from models.scout_info import ScoutInfo
 
 class AutoScouting(BaseModel):
-    # 300 is already an extremely generous ceiling for the autonomous
-    # period. Rejecting anything above it keeps accidental long-presses and
-    # period mix-ups out of the shared statistics.
     fuel_scored: int = Field(ge=0, le=300)
 
 class TeleopScouting(BaseModel):

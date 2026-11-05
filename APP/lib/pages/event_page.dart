@@ -17,6 +17,7 @@ import 'package:app/widgets/event_stats_grid.dart';
 import 'package:app/widgets/team_comparison.dart';
 import 'package:app/services/recent_events.dart';
 import 'package:app/widgets/scout_stats_view.dart';
+import 'package:app/widgets/event_schedule_view.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -55,7 +56,7 @@ class _EventPageState extends State<EventPage> {
   bool _isRefreshing = false;
   bool _authStateInitialized = false;
 
-  String _displayEvent = '';
+  EventSearchKey? _eventDetails;
   String? _statsUsername;
   String? _pitGroupId;
 
@@ -63,7 +64,7 @@ class _EventPageState extends State<EventPage> {
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? APIService();
-    _selectedIndex = const {0, 1, 2, 3, 5, 6, 7}.contains(widget.initialSection)
+    _selectedIndex = const {0, 1, 2, 3, 5, 6, 7, 8}.contains(widget.initialSection)
         ? widget.initialSection
         : 0;
     _scoutingOpened = _selectedIndex == 5;
@@ -71,7 +72,7 @@ class _EventPageState extends State<EventPage> {
     _apiEventKey = _eventKeyForApi(widget.eventCode);
     RecentEvents.remember(_apiEventKey);
 
-    _loadEventName();
+    _loadEventDetails();
   }
 
   @override
@@ -157,16 +158,16 @@ class _EventPageState extends State<EventPage> {
     );
   }
 
-  Future<void> _loadEventName() async {
+  Future<void> _loadEventDetails() async {
     try {
-      final name = await _apiService.fetchEventDisplayNameByKey(_apiEventKey);
+      final details = await _apiService.fetchEventByKey(_apiEventKey);
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _displayEvent = name;
+        _eventDetails = details;
       });
     } catch (_) {
       // The event key is still shown if its display name cannot be loaded.
@@ -202,7 +203,7 @@ class _EventPageState extends State<EventPage> {
     return Scaffold(
       backgroundColor: _pageBackground,
       appBar: PolarForecastAppBar(
-        extraText: _displayEvent,
+        extraText: _eventDetails?.display ?? '',
       ),
       bottomNavigationBar: isWideLayout ? null : _buildBottomNavigation(),
       body: isWideLayout
@@ -254,6 +255,27 @@ class _EventPageState extends State<EventPage> {
                       eventKey: _apiEventKey,
                       groupId: _pitGroupId!,
                       username: _statsUsername!,
+                    );
+                  }
+
+                  if (_selectedIndex == 8) {
+                    if (_statsUsername == null || _pitGroupId == null) {
+                      return const _EmptyState(
+                        icon: Icons.groups_outlined,
+                        title: 'Group required',
+                        message:
+                            'Log in and join a group to view the scouting schedule.',
+                      );
+                    }
+                    return EventScheduleView(
+                      key: ValueKey(
+                          'schedule-$_apiEventKey-$_pitGroupId-$_statsUsername'),
+                      event: _apiEventKey,
+                      eventStart: _eventDetails?.start,
+                      eventEnd: _eventDetails?.end,
+                      rosterGroupId: _pitGroupId!,
+                      getAccessToken: context.read<AuthService>().getAccessToken,
+                      api: _apiService,
                     );
                   }
 
@@ -419,6 +441,12 @@ class _EventPageState extends State<EventPage> {
                           fontSize: 21, fontWeight: FontWeight.w800))),
               for (final section in [
                 (
+                  8,
+                  'Scouting schedule',
+                  'Groups, leads, and activities for this event',
+                  Icons.calendar_month_outlined
+                ),
+                (
                   6,
                   'Pit scouting',
                   'Reports, robot photos, and follow-ups',
@@ -550,6 +578,13 @@ class _EventPageState extends State<EventPage> {
                         label: 'Scouts',
                         icon: Icons.groups_outlined,
                         selectedIcon: Icons.groups_rounded,
+                        extended: extended,
+                      ),
+                      _buildNavigationRailItem(
+                        index: 8,
+                        label: 'Scouting schedule',
+                        icon: Icons.calendar_month_outlined,
+                        selectedIcon: Icons.calendar_month,
                         extended: extended,
                       ),
                       Padding(

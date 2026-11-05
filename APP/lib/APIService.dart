@@ -84,6 +84,70 @@ class APIService {
         .toList();
   }
 
+  Future<Map<String, dynamic>> eventSchedule({
+    required String event,
+    required String rosterGroupId,
+    required String accessToken,
+    Map<String, dynamic>? changes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/events/${Uri.encodeComponent(event)}/schedule');
+    final headers = {
+      'Authorization': 'Bearer $accessToken',
+      'Content-Type': 'application/json',
+    };
+    final response = changes == null
+        ? await _client.get(uri.replace(queryParameters: {
+            'roster_group_id': rosterGroupId,
+          }), headers: headers).timeout(const Duration(seconds: 20))
+        : await _client.put(uri,
+            headers: headers,
+            body: jsonEncode({...changes, 'roster_group_id': rosterGroupId}))
+            .timeout(const Duration(seconds: 20));
+    return _decodeSchedule(response);
+  }
+
+  Future<Map<String, dynamic>> markScheduleAttendance({
+    required String event,
+    required String rosterGroupId,
+    required String accessToken,
+    required int revision,
+    required String rowId,
+    required String groupId,
+    required String student,
+    required String? status,
+  }) async {
+    final uri = Uri.parse(
+        '$baseUrl/events/${Uri.encodeComponent(event)}/schedule/attendance');
+    final response = await _client.patch(uri, headers: {
+      'Authorization': 'Bearer $accessToken',
+      'Content-Type': 'application/json',
+    }, body: jsonEncode({
+      'roster_group_id': rosterGroupId,
+      'revision': revision,
+      'row_id': rowId,
+      'group_id': groupId,
+      'student': student,
+      'status': status,
+    })).timeout(const Duration(seconds: 20));
+    return _decodeSchedule(response);
+  }
+
+  Map<String, dynamic> _decodeSchedule(http.Response response) {
+    if (response.statusCode != 200) {
+      dynamic body;
+      try {
+        body = jsonDecode(response.body);
+      } on FormatException {
+        // A proxy or unavailable API can return a non-JSON error.
+      }
+      final detail = body is Map ? body['detail'] : null;
+      throw Exception(detail is String
+          ? detail
+          : 'Schedule request failed (${response.statusCode}).');
+    }
+    return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  }
+
   Future<GlobalRankingPage> fetchGlobalRankings({
     int offset = 0,
     String query = '',
@@ -161,8 +225,11 @@ class APIService {
         .toList();
   }
 
-  Future<List<EventSearchKey>> fetchEventKeys() async {
-    final uri = Uri.parse('$baseUrl/searchkeys');
+  Future<List<EventSearchKey>> fetchEventKeys({String? year}) async {
+    final baseUri = Uri.parse('$baseUrl/searchkeys');
+    final uri = year == null
+        ? baseUri
+        : baseUri.replace(queryParameters: {'year': year});
     final response =
         await _client.get(uri, headers: {'Accept': 'application/json'});
 
@@ -216,33 +283,10 @@ class APIService {
     return Map<String, dynamic>.from(body);
   }
 
-  Future<String> fetchEventDisplayNameByKey(String key) async {
-    final uri = Uri.parse('$baseUrl/searchkeys');
-    final response =
-        await _client.get(uri, headers: {'Accept': 'application/json'});
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load event keys: ${response.statusCode}');
-    }
-
-    final body = jsonDecode(response.body);
-
-    if (body is! Map || body['data'] is! List) {
-      throw Exception(
-        'Unexpected response format: expected a JSON object with a data list.',
-      );
-    }
-
-    final list = (body['data'] as List)
-        .map((item) => Map<String, dynamic>.from(item as Map))
-        .toList();
-
-    final match = list.firstWhere(
-      (item) => item['key'] == key,
-      orElse: () => {},
-    );
-
-    return match['display'];
+  Future<EventSearchKey?> fetchEventByKey(String key) async {
+    final year = RegExp(r'^\d{4}').stringMatch(key);
+    final events = await fetchEventKeys(year: year);
+    return events.where((event) => event.key == key).firstOrNull;
   }
 
   Future<List<TeamStat>> fetchRawStatsByEvent(
@@ -1043,25 +1087,26 @@ class APIService {
         Map<String, dynamic>.from(jsonDecode(response.body) as Map));
   }
 
-// Add this method inside your APIService class.
   Future<void> setGroupMemberRole({
     required String groupId,
     required String username,
     required String newRole,
-    required String requesterUsername,
+    required String accessToken,
   }) async {
     final uri = Uri.parse('$baseUrl/groups/set-role').replace(
       queryParameters: {
         'group_id': groupId,
         'username': username,
         'new_role': newRole,
-        'requester_username': requesterUsername,
       },
     );
 
     final response = await _client.post(
       uri,
-      headers: {'Accept': 'application/json'},
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {

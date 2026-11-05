@@ -1,9 +1,35 @@
 import unittest
+from unittest.mock import Mock, patch
 
-from api import app
+from fastapi.testclient import TestClient
+
+from api import GroupMembersCollection, app
 
 
 class RouteRegistrationTests(unittest.TestCase):
+    def test_member_cannot_promote_themself_by_naming_an_owner(self):
+        with (
+            patch("api.requests.get", return_value=Mock(
+                status_code=200, json=lambda: {"sub": "member-id"},
+            )) as user_info,
+            patch.object(GroupMembersCollection, "find_one", return_value={"role": "member"}) as membership,
+        ):
+            client = TestClient(app)
+            self.addCleanup(client.close)
+            params = {
+                "group_id": "roster", "username": "member",
+                "new_role": "admin", "requester_username": "owner",
+            }
+            self.assertEqual(client.post("/groups/set-role", params=params).status_code, 401)
+            response = client.post(
+                "/groups/set-role", params=params, headers={"Authorization": "Bearer member-token"},
+            )
+            self.assertEqual(response.status_code, 403)
+            membership.assert_called_once_with({"group_id": "roster", "user_id": "member-id"})
+            self.assertEqual(user_info.call_args.kwargs["headers"], {
+                "Authorization": "Bearer member-token",
+            })
+
     def test_extracted_routes_are_registered_once(self):
         application_routes = [
             (method, route.path)

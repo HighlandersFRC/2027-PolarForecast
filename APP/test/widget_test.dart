@@ -16,8 +16,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _EventApi extends APIService {
   @override
-  Future<String> fetchEventDisplayNameByKey(String event) async =>
-      'Colorado Regional';
+  Future<EventSearchKey?> fetchEventByKey(String event) async => EventSearchKey(
+        key: event,
+        display: 'Colorado Regional',
+        page: '/event/coden',
+        start: '2026-03-19',
+        end: '2026-03-21',
+      );
   @override
   Future<List<TeamStat>> fetchRawStatsByEvent(String event,
           {String? username}) async =>
