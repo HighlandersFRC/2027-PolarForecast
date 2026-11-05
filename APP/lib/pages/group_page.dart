@@ -38,7 +38,6 @@ class _GroupPageState extends State<GroupPage> {
             currentGroup.toLowerCase() == groupName.toLowerCase();
         final groupId = _cleanText(auth.groupId);
         final role = _cleanText(auth.role, fallback: 'member').toLowerCase();
-        final currentUsername = _cleanText(auth.username);
         final isOwner = role == 'owner';
         final isAdmin = isOwner || role == 'admin';
         final isWide = MediaQuery.of(context).size.width >= 900;
@@ -60,7 +59,6 @@ class _GroupPageState extends State<GroupPage> {
             groupName: groupName,
             groupId: groupId,
             role: role,
-            currentUsername: currentUsername,
             isAdmin: isAdmin,
             isOwner: isOwner,
             isLoggedIn: isLoggedIn,
@@ -77,7 +75,6 @@ class _GroupPageState extends State<GroupPage> {
     required String groupName,
     required String groupId,
     required String role,
-    required String currentUsername,
     required bool isAdmin,
     required bool isOwner,
     required bool isLoggedIn,
@@ -105,7 +102,6 @@ class _GroupPageState extends State<GroupPage> {
       groupName: groupName,
       groupId: groupId,
       role: role,
-      currentUsername: currentUsername,
       isAdmin: isAdmin,
       isOwner: isOwner,
     );
@@ -143,7 +139,6 @@ class _GroupContent extends StatefulWidget {
   final String groupName;
   final String groupId;
   final String role;
-  final String currentUsername;
   final bool isAdmin;
   final bool isOwner;
 
@@ -152,7 +147,6 @@ class _GroupContent extends StatefulWidget {
     required this.groupName,
     required this.groupId,
     required this.role,
-    required this.currentUsername,
     required this.isAdmin,
     required this.isOwner,
   });
@@ -175,7 +169,6 @@ class _GroupContentState extends State<_GroupContent> {
     final groupName = widget.groupName;
     final groupId = widget.groupId;
     final role = widget.role;
-    final currentUsername = widget.currentUsername;
     final isAdmin = widget.isAdmin;
     final isOwner = widget.isOwner;
     return Column(
@@ -198,7 +191,6 @@ class _GroupContentState extends State<_GroupContent> {
               _GroupPeopleView(
                 api: _api,
                 groupId: groupId,
-                requesterUsername: currentUsername,
                 isOwner: isOwner,
               ),
             ],
@@ -1251,13 +1243,11 @@ class _EventCard extends StatelessWidget {
 class _GroupPeopleView extends StatefulWidget {
   final APIService api;
   final String groupId;
-  final String requesterUsername;
   final bool isOwner;
 
   const _GroupPeopleView({
     required this.api,
     required this.groupId,
-    required this.requesterUsername,
     required this.isOwner,
   });
 
@@ -1514,15 +1504,6 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
       return;
     }
 
-    if (widget.requesterUsername.isEmpty) {
-      _showSnackBar(
-        context,
-        'Your account username is unavailable. Sign in again and retry.',
-        isError: true,
-      );
-      return;
-    }
-
     final map = _memberMap(member);
     final username = _cleanText(map['username']);
     final currentRole =
@@ -1587,7 +1568,7 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
         groupId: widget.groupId,
         username: username,
         newRole: newRole,
-        requesterUsername: widget.requesterUsername,
+        accessToken: await context.read<AuthService>().getAccessToken(),
       );
 
       if (!mounted) return;

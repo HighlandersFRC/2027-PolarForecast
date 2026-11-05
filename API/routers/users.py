@@ -2,13 +2,14 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from models.group import ApproveJoinRequest, JoinCodeRequest, JoinGroupRequest
 
 
 @dataclass(frozen=True)
 class UserDependencies:
+    authenticated_user: Callable[..., str]
     group_members_collection: Any
     groups_collection: Any
     join_requests_collection: Any
@@ -169,19 +170,10 @@ def create_user_router(dependencies: UserDependencies) -> APIRouter:
         group_id: str,
         username: str,
         new_role: str,
-        requester_username: str,
+        requester_id: str = Depends(dependencies.authenticated_user),
     ):
         if new_role not in {"member", "admin"}:
             raise HTTPException(status_code=400, detail="Invalid role")
-
-        admin_token = dependencies.get_keycloak_admin_token()
-        requester_id = dependencies.find_keycloak_user_id(
-            requester_username,
-            admin_token,
-        )
-
-        if not requester_id:
-            raise HTTPException(status_code=401, detail="Requester not found")
 
         requester = dependencies.group_members_collection.find_one({
             "group_id": group_id,
@@ -200,7 +192,9 @@ def create_user_router(dependencies: UserDependencies) -> APIRouter:
                 detail="Only the group owner can change member roles",
             )
 
-        user_id = dependencies.find_keycloak_user_id(username, admin_token)
+        user_id = dependencies.find_keycloak_user_id(
+            username, dependencies.get_keycloak_admin_token(),
+        )
 
         if not user_id:
             raise HTTPException(status_code=404, detail="User not found")
