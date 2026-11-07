@@ -1127,6 +1127,32 @@ class APIService {
     }
   }
 
+  Future<void> removeGroupMember({
+    required String groupId,
+    required String username,
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse(
+      '$baseUrl/groups/${Uri.encodeComponent(groupId)}/members/${Uri.encodeComponent(username)}',
+    );
+    final response = await _client.delete(
+      uri,
+      headers: {'Authorization': 'Bearer $accessToken'},
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'Failed to remove member';
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['detail'] != null) {
+          message = decoded['detail'].toString();
+        }
+      } catch (_) {
+        if (response.body.trim().isNotEmpty) message = response.body;
+      }
+      throw Exception(message);
+    }
+  }
+
   Future<Map<String, dynamic>> createGroup(String name,
       {String? username}) async {
     final uri = Uri.parse('$baseUrl/groups');

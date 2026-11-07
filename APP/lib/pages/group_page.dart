@@ -1463,6 +1463,7 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
                           canManageRoles: false,
                           busyUsernames: _busyUsernames,
                           onRoleChanged: _changeMemberRole,
+                          onRemove: _removeMember,
                         ),
                         _RoleSection(
                           title: 'Admins',
@@ -1471,6 +1472,7 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
                           canManageRoles: widget.isOwner,
                           busyUsernames: _busyUsernames,
                           onRoleChanged: _changeMemberRole,
+                          onRemove: _removeMember,
                         ),
                         _RoleSection(
                           title: 'Members',
@@ -1479,6 +1481,7 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
                           canManageRoles: widget.isOwner,
                           busyUsernames: _busyUsernames,
                           onRoleChanged: _changeMemberRole,
+                          onRemove: _removeMember,
                         ),
                       ],
                     ),
@@ -1591,6 +1594,47 @@ class _GroupPeopleViewState extends State<_GroupPeopleView> {
         "Could not change @$username's role: $error",
         isError: true,
       );
+    }
+  }
+
+  Future<void> _removeMember(dynamic member) async {
+    if (!widget.isOwner) return;
+    final map = _memberMap(member);
+    final username = _cleanText(map['username']);
+    final role = _cleanText(map['role'], fallback: 'member').toLowerCase();
+    if (username.isEmpty || role == 'owner' || _busyUsernames.contains(username)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _PolarColors.surfaceRaised,
+        title: Text('Remove @$username?', style: const TextStyle(color: Colors.white)),
+        content: Text('@$username will lose access to this team and its scouting data.', style: const TextStyle(color: _PolarColors.mutedText)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: _PolarColors.danger, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.person_remove_rounded),
+            label: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busyUsernames.add(username));
+    try {
+      await widget.api.removeGroupMember(
+        groupId: widget.groupId,
+        username: username,
+        accessToken: await context.read<AuthService>().getAccessToken(),
+      );
+      if (!mounted) return;
+      setState(() { _busyUsernames.remove(username); _reload(); });
+      _showSnackBar(context, '@$username was removed from the team.');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _busyUsernames.remove(username));
+      _showSnackBar(context, 'Could not remove @$username: $error', isError: true);
     }
   }
 
@@ -1710,6 +1754,7 @@ class _RoleSection extends StatelessWidget {
   final bool canManageRoles;
   final Set<String> busyUsernames;
   final Future<void> Function(dynamic member, String newRole) onRoleChanged;
+  final Future<void> Function(dynamic member) onRemove;
 
   const _RoleSection({
     required this.title,
@@ -1718,6 +1763,7 @@ class _RoleSection extends StatelessWidget {
     required this.canManageRoles,
     required this.busyUsernames,
     required this.onRoleChanged,
+    required this.onRemove,
   });
 
   @override
@@ -1769,6 +1815,8 @@ class _RoleSection extends StatelessWidget {
                 ),
                 onRoleChanged: (newRole) =>
                     onRoleChanged(members[index], newRole),
+                canRemove: canManageRoles && role != 'owner',
+                onRemove: () => onRemove(members[index]),
               ),
             ],
           ],
@@ -1784,6 +1832,8 @@ class _MemberTile extends StatelessWidget {
   final bool canManageRole;
   final bool busy;
   final Future<void> Function(String newRole) onRoleChanged;
+  final bool canRemove;
+  final VoidCallback onRemove;
 
   const _MemberTile({
     required this.member,
@@ -1791,6 +1841,8 @@ class _MemberTile extends StatelessWidget {
     required this.canManageRole,
     required this.busy,
     required this.onRoleChanged,
+    required this.canRemove,
+    required this.onRemove,
   });
 
   @override
@@ -1847,6 +1899,13 @@ class _MemberTile extends StatelessWidget {
               ),
             ),
           ],
+          if (canRemove)
+            IconButton(
+              tooltip: 'Remove from team',
+              onPressed: busy ? null : onRemove,
+              color: _PolarColors.danger,
+              icon: const Icon(Icons.person_remove_rounded),
+            ),
         ],
       ),
     );

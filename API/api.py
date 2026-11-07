@@ -2970,6 +2970,24 @@ def assign_user_to_group(user_id: str, group_id: str, token: str):
         )
 
 
+def remove_user_from_group(user_id: str, group_id: str, token: str):
+    group_membership_url = (
+        f"{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}/users/{user_id}/groups/{group_id}"
+    )
+    response = requests.delete(
+        group_membership_url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=20,
+    )
+    # A stale Mongo membership can outlive its Keycloak user/group link.
+    # Treat an already-missing Keycloak association as successfully removed.
+    if response.status_code not in [204, 200, 404]:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak user group removal failed: {response.status_code} {response.text}",
+        )
+
+
 def create_keycloak_group(name: str, token: str):
     group_url = f"{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}/groups"
     response = requests.post(
@@ -3318,5 +3336,6 @@ app.include_router(create_user_router(UserDependencies(
     get_keycloak_admin_token=get_keycloak_admin_token,
     find_keycloak_user_id=find_keycloak_user_id,
     assign_user_to_group=assign_user_to_group,
+    remove_user_from_group=remove_user_from_group,
     now_utc=now_utc,
 )))

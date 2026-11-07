@@ -70,6 +70,7 @@ class RouteRegistrationTests(unittest.TestCase):
             ("POST", "/groups/reject-request"),
             ("POST", "/groups/set-role"),
             ("GET", "/groups/{group_id}/members"),
+            ("DELETE", "/groups/{group_id}/members/{username}"),
             ("GET", "/user/group"),
         }
 
