@@ -16,6 +16,7 @@ class UserDependencies:
     get_keycloak_admin_token: Callable[..., Any]
     find_keycloak_user_id: Callable[..., Any]
     assign_user_to_group: Callable[..., Any]
+    remove_user_from_group: Callable[..., Any]
     now_utc: Callable[..., Any]
 
 
@@ -223,6 +224,41 @@ def create_user_router(dependencies: UserDependencies) -> APIRouter:
             "username": username,
             "new_role": new_role,
         }
+
+    @router.delete("/groups/{group_id}/members/{username}", tags=["groups", "users"])
+    def remove_group_member(
+        group_id: str,
+        username: str,
+        requester_id: str = Depends(dependencies.authenticated_user),
+    ):
+        requester = dependencies.group_members_collection.find_one({
+            "group_id": group_id,
+            "user_id": requester_id,
+        })
+        if not requester:
+            raise HTTPException(status_code=403, detail="Requester is not in this group")
+        if requester.get("role") != "owner":
+            raise HTTPException(status_code=403, detail="Only the group owner can remove members")
+
+        member = dependencies.group_members_collection.find_one({
+            "group_id": group_id,
+            "username": username,
+        })
+        if not member:
+            raise HTTPException(status_code=404, detail="User not in group")
+        if member.get("role") == "owner":
+            raise HTTPException(status_code=403, detail="The group owner cannot be removed")
+
+        user_id = member.get("user_id")
+        if user_id:
+            admin_token = dependencies.get_keycloak_admin_token()
+            dependencies.remove_user_from_group(user_id, group_id, admin_token)
+
+        dependencies.group_members_collection.delete_one({"_id": member["_id"]} if "_id" in member else {
+            "group_id": group_id,
+            "username": username,
+        })
+        return {"success": True, "username": username}
 
     @router.get("/groups/{group_id}/members", tags=["groups", "users"])
     def get_group_members(group_id: str):
